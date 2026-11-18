@@ -157,6 +157,7 @@ export const DatabaseAddModal: React.FC<DatabaseAddModalProps> = ({
   const fsLots = firestoreDataset?.lots || [];
   const fsDrShipments = firestoreDataset?.dr_shipments || [];
   const fsOpnameLogs = firestoreDataset?.opname_logs || [];
+  const fsPartners = firestoreDataset?.partners || [];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -201,6 +202,7 @@ export const DatabaseAddModal: React.FC<DatabaseAddModalProps> = ({
           hybrid_id: drHybridId || null,
           existingLots: fsLots,
           existingDrShipments: fsDrShipments,
+          existingPartners: fsPartners,
         });
         onSuccess(`DR Shipment ${created.doc_id} (Lot ${created.lot_no}) berhasil ditambahkan ke Firestore.`, "dr_shipments");
         onClose();

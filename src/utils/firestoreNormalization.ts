@@ -59,6 +59,7 @@ export interface LotFsDoc {
 export interface DrShipmentFsDoc {
   doc_id: string;
   shipping_date: string;
+  partner_name?: string | null;
   partner_id: string | null;
   lot_no: string;
   sku?: string | null;
@@ -762,3 +763,30 @@ export function hydrateDashboardFromNormalized(data: NormalizedDataset): {
 
   return { employees, kiosks, workingData, drSalesData };
 }
+
+export const formatToDDMMYYYY = (raw: any): string => {
+  if (!raw) return "";
+  const s = String(raw).trim();
+  if (/^\d{8}$/.test(s)) return s;
+  const iso = toIsoDateStr(s);
+  if (iso) {
+    const [y, m, d] = iso.split("-");
+    return `${d}${m}${y}`;
+  }
+  return s;
+};
+
+export const parseDDMMYYYYToIso = (raw: any): string => {
+  if (!raw) return new Date().toISOString().slice(0, 10);
+  const s = String(raw).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  if (/^\d{8}$/.test(s)) {
+    const d = s.slice(0, 2);
+    const m = s.slice(2, 4);
+    const y = s.slice(4, 8);
+    return `${y}-${m}-${d}`;
+  }
+  const iso = toIsoDateStr(s);
+  return iso || new Date().toISOString().slice(0, 10);
+};
+

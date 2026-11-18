@@ -6,7 +6,7 @@ import { PartnerDeleteModal } from "../modals/PartnerDeleteModal";
 import { EmployeeEditModal } from "../modals/EmployeeEditModal";
 import { EmployeeDeleteModal } from "../modals/EmployeeDeleteModal";
 import { useFirebase } from "../../contexts/FirebaseContext";
-import { buildNormalizedCollections } from "../../utils/firestoreNormalization";
+import { buildNormalizedCollections, formatToDDMMYYYY } from "../../utils/firestoreNormalization";
 import {
   bulkAddDrShipmentsFirestore,
   bulkAddEmployeesFirestore,
@@ -1540,10 +1540,13 @@ export const TempTab: React.FC<TempTabProps> = ({
         };
       }
       if (colKey === "dr_shipments") {
+        const todayDdMmYyyy = new Date().toLocaleDateString("en-GB").split("/").join("");
+        const defaultPartner = partnersCol[0];
         return {
           _draftId,
-          shipping_date: todayIso,
-          partner_id: defaultPartnerId,
+          shipping_date: todayDdMmYyyy,
+          partner_name: defaultPartner?.partner_name || "",
+          partner_id: defaultPartner?.doc_id || "",
           lot_no: "",
           sku: "",
           exp_date: "",
@@ -1736,6 +1739,7 @@ export const TempTab: React.FC<TempTabProps> = ({
           firebaseUser,
           drafts.map((d) => ({
             shipping_date: d.shipping_date,
+            partner_name: d.partner_name || "",
             partner_id: d.partner_id || null,
             lot_no: d.lot_no,
             sku: d.sku || "",
@@ -1744,6 +1748,7 @@ export const TempTab: React.FC<TempTabProps> = ({
           })),
           fsLots,
           fsDrShipments,
+          fsPartners,
         );
       } else if (activeCollection === "opname_logs") {
         savedCount = await bulkAddOpnameLogsFirestore(
@@ -2078,7 +2083,7 @@ export const TempTab: React.FC<TempTabProps> = ({
         ];
       }
       if (colKey === "dr_shipments") {
-        return ["shipping_date", "partner_id", "lot_no", "sku", "exp_date", "shipped_qty_kg"];
+        return ["shipping_date", "partner_name", "partner_id", "lot_no", "sku", "exp_date", "shipped_qty_kg"];
       }
       if (colKey === "lots") {
         return mode === "draft"
@@ -2451,6 +2456,7 @@ export const TempTab: React.FC<TempTabProps> = ({
       try {
         const fsLots = firestoreDataset?.lots || [];
         const fsEmployees = firestoreDataset?.employees || [];
+        const fsPartners = firestoreDataset?.partners || [];
         let updatedCount = 0;
 
         if (colKey === "hybrids") {
@@ -2481,6 +2487,7 @@ export const TempTab: React.FC<TempTabProps> = ({
             rowsToSave.map((r) => ({
               doc_id: r.doc_id,
               shipping_date: r.shipping_date,
+              partner_name: r.partner_name || "",
               partner_id: r.partner_id || null,
               lot_no: r.lot_no,
               sku: r.sku || "",
@@ -2489,6 +2496,7 @@ export const TempTab: React.FC<TempTabProps> = ({
               shipped_qty_kg: Number(r.shipped_qty_kg) || 0,
             })),
             fsLots,
+            fsPartners,
           );
         } else if (colKey === "opname_logs") {
           updatedCount = await bulkUpdateOpnameLogsFirestore(
@@ -3847,6 +3855,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                       </th>
                       {renderHeaderCell("dr_shipments", "doc_id", "doc_id (PK)")}
                       {renderHeaderCell("dr_shipments", "shipping_date", "shipping_date")}
+                      {renderHeaderCell("dr_shipments", "partner_name", "partner_name")}
                       {renderHeaderCell("dr_shipments", "partner_id", "partner_id (FK)")}
                       {renderHeaderCell("dr_shipments", "lot_no", "lot_no (FK)")}
                       {renderHeaderCell("dr_shipments", "sku", "sku")}
@@ -3866,7 +3875,8 @@ export const TempTab: React.FC<TempTabProps> = ({
                         </td>
                         <td className="py-2 px-3">
                           <input
-                            type="date"
+                            type="text"
+                            maxLength={8}
                             value={d.shipping_date}
                             onPaste={(e) => handlePasteDraftCells("dr_shipments", draftIdx, "shipping_date", e)}
                             onChange={(e) =>
@@ -3874,7 +3884,27 @@ export const TempTab: React.FC<TempTabProps> = ({
                                 shipping_date: e.target.value,
                               })
                             }
-                            className="h-8 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                            placeholder="DDMMYYYY"
+                            className="h-8 w-28 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-mono font-semibold outline-none"
+                          />
+                        </td>
+                        <td className="py-2 px-3">
+                          <input
+                            type="text"
+                            value={d.partner_name || ""}
+                            onPaste={(e) => handlePasteDraftCells("dr_shipments", draftIdx, "partner_name", e)}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              const matched = partnersCol.find(
+                                (p) => cleanForMatch(p.partner_name) === cleanForMatch(val),
+                              );
+                              handleUpdateInlineDraft("dr_shipments", d._draftId, {
+                                partner_name: val,
+                                partner_id: matched ? matched.doc_id : d.partner_id,
+                              });
+                            }}
+                            placeholder="Nama Partner*"
+                            className="h-8 w-40 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold uppercase outline-none"
                           />
                         </td>
                         <td className="py-2 px-3">
@@ -3886,7 +3916,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                                 partner_id: e.target.value,
                               })
                             }
-                            className="h-8 w-44 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                            className="h-8 w-36 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
                           >
                             <option value="">-- Pilih Partner --</option>
                             {partnersCol.map((p) => (

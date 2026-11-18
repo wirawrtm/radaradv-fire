@@ -23,6 +23,8 @@ import {
 import {
   clampStr,
   FISCAL_MONTH_COLS,
+  formatToDDMMYYYY,
+  parseDDMMYYYYToIso,
   toIsoDateStr,
   toStrictDivision,
   toValidDocId,
@@ -1368,6 +1370,63 @@ export async function addLotFirestore(
   return newLot;
 }
 
+export async function resolvePartnerIdByName(
+  user: User | null | undefined,
+  partnerNameInput: string,
+  existingPartners: PartnerFsDoc[],
+): Promise<string | null> {
+  const nameStr = String(partnerNameInput || "").trim();
+  if (!nameStr) return null;
+  const cleanInput = cleanForMatch(nameStr);
+  if (!cleanInput) return null;
+
+  const found = existingPartners.find(
+    (p) => cleanForMatch(p.partner_name) === cleanInput || cleanForMatch(p.doc_id) === cleanInput,
+  );
+  if (found) return found.doc_id;
+
+  const newName = clampStr(nameStr.toUpperCase(), 160);
+  const existingIds = new Set(existingPartners.map((p) => p.doc_id));
+  let nextNum = existingPartners.length + 1;
+  let finalId = `PTR-${String(nextNum).padStart(3, "0")}`;
+  while (existingIds.has(finalId)) {
+    nextNum++;
+    finalId = `PTR-${String(nextNum).padStart(3, "0")}`;
+  }
+
+  const newPartner: PartnerFsDoc = {
+    doc_id: finalId,
+    partner_name: newName,
+    category: "R1",
+    pic_employee_id: null,
+    pic_name: "-",
+    division_group: "Field Corn",
+    province: "Central Java",
+    area: "-",
+  };
+
+  try {
+    await setDoc(doc(db, "partners", finalId), {
+      doc_id: finalId,
+      partner_name: newName,
+      category: "R1",
+      pic_employee_id: null,
+      pic_name: "-",
+      division_group: "Field Corn",
+      province: "Central Java",
+      area: "-",
+      ownerUid: user?.uid || "public",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    existingPartners.push(newPartner);
+  } catch (err) {
+    // fallback
+  }
+
+  return finalId;
+}
+
 /**
  * Add a single DR Shipment document directly to Firestore (/dr_shipments/{doc_id}).
  * Atomically ensures referenced /lots/{lot_no} exists so existsAfter() succeeds.
@@ -1376,6 +1435,7 @@ export async function addDrShipmentFirestore(
   user: User | null | undefined,
   params: {
     shipping_date: string;
+    partner_name?: string | null;
     partner_id: string | null;
     lot_no: string;
     sku?: string | null;
@@ -1384,6 +1444,7 @@ export async function addDrShipmentFirestore(
     hybrid_id?: string | null;
     existingLots: LotFsDoc[];
     existingDrShipments: DrShipmentFsDoc[];
+    existingPartners: PartnerFsDoc[];
   },
 ): Promise<DrShipmentFsDoc> {
   const ownerUid = user?.uid || "public";
@@ -1391,11 +1452,10 @@ export async function addDrShipmentFirestore(
   if (!lotNo) throw new Error("Nomor Lot wajib diisi.");
   const skuVal = clampStr(params.sku, 80);
 
-  const shippingDate = clampStr(
-    toIsoDateStr(params.shipping_date) || new Date().toISOString().slice(0, 10),
-    20,
-    "2026-01-01",
-  );
+  const shippingDate = parseDDMMYYYYToIso(params.shipping_date);
+  const resolvedPartnerId = params.partner_id
+    ? toValidDocId(params.partner_id)
+    : await resolvePartnerIdByName(user, params.partner_name || "", params.existingPartners);
   const expDate = clampStr(toIsoDateStr(params.exp_date || extractExpFromLot(lotNo)), 20);
   const numQty = Number(params.shipped_qty_kg);
   const qtyKg = Number.isFinite(numQty) && numQty >= 0 ? numQty : 0;
@@ -1748,6 +1808,7 @@ export async function bulkAddDrShipmentsFirestore(
   user: User | null | undefined,
   rows: Array<{
     shipping_date: string;
+    partner_name?: string | null;
     partner_id: string | null;
     lot_no: string;
     sku?: string | null;
@@ -1756,6 +1817,7 @@ export async function bulkAddDrShipmentsFirestore(
   }>,
   existingLots: LotFsDoc[],
   existingDrShipments: DrShipmentFsDoc[],
+  existingPartners: PartnerFsDoc[],
 ): Promise<number> {
   const ownerUid = user?.uid || "public";
   const existingLotMap = new Map(existingLots.map((l) => [toValidDocId(l.doc_id), l]));
@@ -1781,11 +1843,10 @@ export async function bulkAddDrShipmentsFirestore(
     const lotNo = toValidDocId(String(r.lot_no || "").toUpperCase(), "");
     if (!lotNo) continue;
 
-    const shippingDate = clampStr(
-      toIsoDateStr(r.shipping_date) || new Date().toISOString().slice(0, 10),
-      20,
-      "2026-01-01",
-    );
+    const shippingDate = parseDDMMYYYYToIso(r.shipping_date);
+    const resolvedPartnerId = r.partner_id
+      ? toValidDocId(r.partner_id)
+      : await resolvePartnerIdByName(user, r.partner_name || "", existingPartners);
     const expDate = clampStr(toIsoDateStr(r.exp_date || extractExpFromLot(lotNo)), 20);
     const numQty = Number(r.shipped_qty_kg);
     const qtyKg = Number.isFinite(numQty) && numQty >= 0 ? numQty : 0;
@@ -1821,7 +1882,7 @@ export async function bulkAddDrShipmentsFirestore(
       data: {
         doc_id: drId,
         shipping_date: shippingDate,
-        partner_id: r.partner_id ? toValidDocId(r.partner_id) : null,
+        partner_id: resolvedPartnerId,
         lot_no: lotNo,
         exp_date: expDate,
         shipped_qty_kg: qtyKg,
@@ -2220,6 +2281,7 @@ export async function bulkUpdateDrShipmentsFirestore(
   rows: Array<{
     doc_id: string;
     shipping_date: string;
+    partner_name?: string | null;
     partner_id: string | null;
     lot_no: string;
     sku?: string | null;
@@ -2228,6 +2290,7 @@ export async function bulkUpdateDrShipmentsFirestore(
     shipped_qty_kg: number;
   }>,
   existingLots: LotFsDoc[],
+  existingPartners: PartnerFsDoc[],
 ): Promise<number> {
   const ownerUid = user?.uid || "public";
   const existingLotIds = new Set(existingLots.map((l) => toValidDocId(l.doc_id)));
@@ -2240,11 +2303,10 @@ export async function bulkUpdateDrShipmentsFirestore(
     const lotNo = toValidDocId(String(r.lot_no || "").toUpperCase(), "");
     if (!docId || !lotNo) continue;
 
-    const shippingDate = clampStr(
-      toIsoDateStr(r.shipping_date) || new Date().toISOString().slice(0, 10),
-      20,
-      "2026-01-01",
-    );
+    const shippingDate = parseDDMMYYYYToIso(r.shipping_date);
+    const resolvedPartnerId = r.partner_id
+      ? toValidDocId(r.partner_id)
+      : await resolvePartnerIdByName(user, r.partner_name || "", existingPartners);
     const expDate = clampStr(toIsoDateStr(r.exp_date || extractExpFromLot(lotNo)), 20);
     const numQty = Number(r.shipped_qty_kg);
     const qtyKg = Number.isFinite(numQty) && numQty >= 0 ? numQty : 0;
@@ -2272,7 +2334,7 @@ export async function bulkUpdateDrShipmentsFirestore(
       docId,
       data: {
         shipping_date: shippingDate,
-        partner_id: r.partner_id ? toValidDocId(r.partner_id) : null,
+        partner_id: resolvedPartnerId,
         lot_no: lotNo,
         exp_date: expDate,
         shipped_qty_kg: qtyKg,
