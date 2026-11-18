@@ -5,6 +5,7 @@ import { PartnerEditModal } from "../modals/PartnerEditModal";
 import { PartnerDeleteModal } from "../modals/PartnerDeleteModal";
 import { EmployeeEditModal } from "../modals/EmployeeEditModal";
 import { EmployeeDeleteModal } from "../modals/EmployeeDeleteModal";
+import { DatabaseAddModal, type OperationalCollectionKey } from "../modals/DatabaseAddModal";
 import { useFirebase } from "../../contexts/FirebaseContext";
 import { buildNormalizedCollections } from "../../utils/firestoreNormalization";
 import { saveUploadedDrToFirestore } from "../../services/firestoreDb";
@@ -49,7 +50,7 @@ export interface TempTabProps {
   setEmployeeDeleteModal?: React.Dispatch<React.SetStateAction<{ isOpen: boolean; item: any }>>;
   handleEditPartnerSave?: (id: any, newPic: any, additionalData?: any) => Promise<void>;
   handleDeletePartnerConfirm?: () => Promise<void>;
-  handleEditEmployeeSave?: (empData: any) => Promise<void>;
+  handleEditEmployeeSave?: (originalName: string, updatedFields: any, isAdd?: boolean) => Promise<void>;
   handleDeleteEmployeeConfirm?: () => Promise<void>;
   isActionLoading?: boolean;
   onRefreshDatabase?: () => Promise<void>;
@@ -196,6 +197,7 @@ export const TempTab: React.FC<TempTabProps> = ({
   const [feedback, setFeedback] = useState<string | null>(null);
   const [showRulesPanel, setShowRulesPanel] = useState(false);
   const [copiedRules, setCopiedRules] = useState(false);
+  const [isDbAddModalOpen, setIsDbAddModalOpen] = useState(false);
 
   const mergedDrSales = useMemo(
     () => [...(drSalesData || []), ...uploadedDrRows],
@@ -297,7 +299,7 @@ export const TempTab: React.FC<TempTabProps> = ({
   const { employeesCol, empByClean, empById } = useMemo(() => {
     const tempIdByClean = new Map<string, string>();
     (employees || []).forEach((e, idx) => {
-      const docId = padId("EMP", idx + 1, 3);
+      const docId = e.doc_id ? String(e.doc_id) : padId("EMP", idx + 1, 3);
       const cn = cleanForMatch(e.name || "");
       const cu = cleanForMatch(e.user || "");
       if (cn) tempIdByClean.set(cn, docId);
@@ -317,13 +319,15 @@ export const TempTab: React.FC<TempTabProps> = ({
     };
 
     const baseDocs = (employees || []).map((e, idx) => {
-      const doc_id = padId("EMP", idx + 1, 3);
+      const doc_id = e.doc_id ? String(e.doc_id) : padId("EMP", idx + 1, 3);
       const uplineClean = cleanForMatch(e.upline || "");
       const upline_id =
         uplineClean && tempIdByClean.has(uplineClean) ? tempIdByClean.get(uplineClean)! : null;
       const position = String(e.position || "Business Solution").trim();
       const role_level = getRoleLevel(position, e.level);
-      const division_group = toStrictDivision(e.group || position);
+      const rawGroup = String(e.group || e.division_group || position).trim().toLowerCase();
+      const division_group: "Field Corn" | "Vegetables" | "All" =
+        rawGroup === "all" ? "All" : toStrictDivision(e.group || position);
 
       return {
         doc_id,
@@ -353,10 +357,14 @@ export const TempTab: React.FC<TempTabProps> = ({
     });
 
     const docs = baseDocs.map((d) => {
-      // Admin (Lv.5): bisa melihat SEMUA data, namun HANYA pada divisinya saja (Field Corn saja ATAU Vegetables saja)
+      // Admin / Super User (Lv.5): jika division_group === "All", mencakup semua divisi
       if (d.role_level >= 5) {
         const divSubs = baseDocs
-          .filter((other) => other.doc_id !== d.doc_id && other.division_group === d.division_group)
+          .filter(
+            (other) =>
+              other.doc_id !== d.doc_id &&
+              (d.division_group === "All" || other.division_group === d.division_group),
+          )
           .map((other) => other.doc_id);
         return {
           ...d,
@@ -816,17 +824,20 @@ export const TempTab: React.FC<TempTabProps> = ({
     [simulatedLoginEmpId, empById],
   );
 
-  const effectiveDivision: "Field Corn" | "Vegetables" = activeLoginEmp
-    ? activeLoginEmp.division_group
-    : activeDivision;
+  const effectiveDivision: "Field Corn" | "Vegetables" =
+    activeLoginEmp && activeLoginEmp.division_group !== "All"
+      ? activeLoginEmp.division_group
+      : activeDivision;
 
   const allowedEmpSet = useMemo(() => {
     if (activeLoginEmp) {
       return new Set(activeLoginEmp.access_scope_ids);
     }
-    // Admin Divisi: semua karyawan di divisi efektif (Field Corn saja atau Vegetables saja)
+    // Admin Divisi: semua karyawan di divisi efektif + Super User ("All")
     return new Set(
-      employeesCol.filter((e) => e.division_group === effectiveDivision).map((e) => e.doc_id),
+      employeesCol
+        .filter((e) => e.division_group === effectiveDivision || e.division_group === "All")
+        .map((e) => e.doc_id),
     );
   }, [activeLoginEmp, employeesCol, effectiveDivision]);
 
@@ -992,7 +1003,9 @@ export const TempTab: React.FC<TempTabProps> = ({
 
   const filteredEmployees = useMemo(() => {
     const scoped = employeesCol.filter(
-      (e) => e.division_group === effectiveDivision && allowedEmpSet.has(e.doc_id),
+      (e) =>
+        (e.division_group === effectiveDivision || e.division_group === "All") &&
+        allowedEmpSet.has(e.doc_id),
     );
     return filterAndSortDocs(scoped, "employees");
   }, [employeesCol, effectiveDivision, allowedEmpSet, filterAndSortDocs]);
@@ -1565,10 +1578,10 @@ export const TempTab: React.FC<TempTabProps> = ({
             </button>
           </div>
 
-          {activeCollection === "partners" && setPartnerEditModal && (
-            <button
-              type="button"
-              onClick={() =>
+          <button
+            type="button"
+            onClick={() => {
+              if (activeCollection === "partners" && setPartnerEditModal) {
                 setPartnerEditModal({
                   isOpen: true,
                   item: {
@@ -1577,21 +1590,11 @@ export const TempTab: React.FC<TempTabProps> = ({
                     pic: userData?.name || "",
                     category: "R1",
                     province: "",
-                    group: "Field Corn",
+                    group: effectiveDivision,
                     isAdd: true,
                   },
-                })
-              }
-              className="h-9 px-3 rounded-xl bg-[#181a2c] text-white text-xs font-mono font-semibold flex items-center gap-1 cursor-pointer"
-            >
-              + doc
-            </button>
-          )}
-
-          {activeCollection === "employees" && setEmployeeEditModal && (
-            <button
-              type="button"
-              onClick={() => {
+                });
+              } else if (activeCollection === "employees" && setEmployeeEditModal) {
                 const defaultAgro = employeesCol.find(
                   (e) => e.division_group === effectiveDivision && e.role_level === 2,
                 );
@@ -1610,12 +1613,15 @@ export const TempTab: React.FC<TempTabProps> = ({
                     isAdd: true,
                   },
                 });
-              }}
-              className="h-9 px-3 rounded-xl bg-[#181a2c] text-white text-xs font-mono font-semibold flex items-center gap-1 cursor-pointer"
-            >
-              + doc
-            </button>
-          )}
+              } else {
+                setIsDbAddModalOpen(true);
+              }
+            }}
+            className="h-9 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-mono font-semibold flex items-center gap-1 cursor-pointer shadow-sm"
+          >
+            <span className="material-symbols-outlined text-[15px]">add_circle</span>
+            + Tambah Data
+          </button>
 
           <button
             type="button"
@@ -2057,12 +2063,19 @@ export const TempTab: React.FC<TempTabProps> = ({
                     <tr key={e.doc_id} className="hover:bg-[#f4f2ff]/30">
                       <td className="py-2.5 px-4 font-bold">{e.doc_id}</td>
                       <td className="py-2.5 px-4 text-[#434655]">{e.username}</td>
-                      <td className="py-2.5 px-4 text-[#747687]">
-                        {isAuthorizedFirebase || hasFirestoreData ? "••• (Secured)" : e.password}
+                      <td className="py-2.5 px-4 text-[#434655] font-mono">
+                        {e.password || "123"}
                       </td>
                       <td className="py-2.5 px-4 font-sans font-semibold">{e.full_name}</td>
                       <td className="py-2.5 px-4 font-sans text-primary font-medium">
-                        {e.position}
+                        <div className="flex items-center gap-1.5">
+                          <span>{e.position}</span>
+                          {e.role_level >= 5 && (
+                            <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">
+                              Super User
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="py-2.5 px-4 text-center font-bold">Lv.{e.role_level}</td>
                       <td className="py-2.5 px-4">{renderFkBadge(e.upline_id, "employees")}</td>
@@ -2172,6 +2185,24 @@ export const TempTab: React.FC<TempTabProps> = ({
           itemName={employeeDeleteModal.item?.name}
         />
       )}
+      <DatabaseAddModal
+        isOpen={isDbAddModalOpen}
+        onClose={() => setIsDbAddModalOpen(false)}
+        initialCollection={
+          (["opname_logs", "dr_shipments", "lots", "hybrids"].includes(activeCollection)
+            ? activeCollection
+            : "opname_logs") as OperationalCollectionKey
+        }
+        activeDivision={effectiveDivision}
+        partnersCol={partnersCol}
+        employeesCol={employeesCol}
+        hybridsCol={hybridsCol}
+        lotsCol={lotsCol}
+        onSuccess={(msg, targetCol) => {
+          setActiveCollection(targetCol);
+          showToast(msg);
+        }}
+      />
     </div>
   );
 };

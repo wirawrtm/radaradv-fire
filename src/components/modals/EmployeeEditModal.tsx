@@ -35,7 +35,7 @@ export const EmployeeEditModal: React.FC<EmployeeEditModalProps> = ({
   const [province, setProvince] = useState("");
   const [password, setPassword] = useState("");
   const [upline, setUpline] = useState("");
-  const [group, setGroup] = useState<"Field Corn" | "Vegetables">("Field Corn");
+  const [group, setGroup] = useState<"Field Corn" | "Vegetables" | "All">("Field Corn");
 
   const isAdd = !!item?.isAdd;
 
@@ -66,11 +66,13 @@ export const EmployeeEditModal: React.FC<EmployeeEditModalProps> = ({
       setEmail(String(item.user || item.email || ""));
       setPassword(String(item.password || "123"));
       setUpline(String(item.upline || ""));
-      const initDiv = String(item.group || userData?.group || "Field Corn")
-        .toLowerCase()
-        .includes("veg")
-        ? "Vegetables"
-        : "Field Corn";
+      const rawDiv = String(item.group || userData?.group || "Field Corn").trim().toLowerCase();
+      const initDiv: "Field Corn" | "Vegetables" | "All" =
+        rawDiv === "all"
+          ? "All"
+          : rawDiv.includes("veg")
+            ? "Vegetables"
+            : "Field Corn";
       setGroup(initDiv);
 
       if (isAdd && userLevel === 2) {
@@ -97,12 +99,14 @@ export const EmployeeEditModal: React.FC<EmployeeEditModalProps> = ({
     return (allEmployees || []).filter((emp) => {
       if (!emp?.name) return false;
       if (emp.name.toLowerCase().trim() === name.toLowerCase().trim()) return false;
-      const empDiv = String(emp.group || emp.position || "")
-        .toLowerCase()
-        .includes("veg")
-        ? "Vegetables"
-        : "Field Corn";
-      if (empDiv !== group) return false;
+      const empDivRaw = String(emp.group || emp.position || "").trim().toLowerCase();
+      const empDiv =
+        empDivRaw === "all"
+          ? "All"
+          : empDivRaw.includes("veg")
+            ? "Vegetables"
+            : "Field Corn";
+      if (group !== "All" && empDiv !== "All" && empDiv !== group) return false;
       const r = getPositionRank(emp.position);
       return r < targetRank;
     });
@@ -220,12 +224,13 @@ export const EmployeeEditModal: React.FC<EmployeeEditModalProps> = ({
               <select
                 value={group}
                 onChange={(e) =>
-                  setGroup(e.target.value as "Field Corn" | "Vegetables")
+                  setGroup(e.target.value as "Field Corn" | "Vegetables" | "All")
                 }
                 className="w-full h-11 bg-[#fbf8ff] border border-[#edecff] focus:border-primary rounded-full px-4 text-xs font-semibold text-[#111] outline-none"
               >
                 <option value="Field Corn">Field Corn</option>
                 <option value="Vegetables">Vegetables</option>
+                <option value="All">All (Super User · Semua Divisi)</option>
               </select>
             </div>
 

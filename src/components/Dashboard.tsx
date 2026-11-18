@@ -45,6 +45,7 @@ import {
 import {
   deleteEmployeeFirestore,
   deletePartnerFirestore,
+  ensureSuperUserAdityaFirestore,
   saveAccessRulesFirestore,
   saveBatchActivityToFirestore,
   upsertEmployeeFirestore,
@@ -1364,7 +1365,7 @@ const Dashboard = ({
         const latestDataset = await reloadFromFirestore();
         if (latestDataset) {
           const hydrated = hydrateDashboardFromNormalized(latestDataset);
-          setEmployees(hydrated.employees);
+          setEmployees(applyLocalEmployeePasswords(hydrated.employees));
           setKiosks(hydrated.kiosks);
           combinedData = hydrated.workingData;
           combinedDrSales = hydrated.drSalesData;
@@ -1512,6 +1513,40 @@ const Dashboard = ({
     fetchChannels();
   }, [userData.name, userData.position, channelsRefreshKey, isBusinessAnalyst, isAuthReady, isAuthorizedFirebase, kiosks]);
 
+  const applyLocalEmployeePasswords = useCallback((empList: any[]) => {
+    try {
+      const savedMap = JSON.parse(localStorage.getItem("radar_emp_passwords") || "{}");
+      return empList.map((emp) => {
+        const override =
+          savedMap[emp.doc_id] ||
+          savedMap[String(emp.user || "").toLowerCase()] ||
+          savedMap[cleanForMatch(emp.name || "")];
+        return override ? { ...emp, password: override } : emp;
+      });
+    } catch {
+      return empList;
+    }
+  }, []);
+
+  const hasSeededSuperUserRef = useRef(false);
+
+  // Ensure Super User `adityahead` (Business Analyst, Lv.5, password: 123) exists in Firestore /employees
+  useEffect(() => {
+    if (
+      !isAuthReady ||
+      isLoadingFirestore ||
+      firestoreReadError ||
+      !firestoreDataset ||
+      hasSeededSuperUserRef.current
+    ) {
+      return;
+    }
+    hasSeededSuperUserRef.current = true;
+    ensureSuperUserAdityaFirestore(firebaseUser, firestoreDataset.employees).catch((err) => {
+      console.warn("Gagal auto-seed super user adityahead:", err);
+    });
+  }, [isAuthReady, isLoadingFirestore, firestoreReadError, firestoreDataset, firebaseUser]);
+
   // Live real-time hydration directly from Firestore (supports both Public Read-Only & Authorized Admin)
   useEffect(() => {
     if (!isAuthReady) return;
@@ -1531,7 +1566,7 @@ const Dashboard = ({
     }
 
     const hydrated = hydrateDashboardFromNormalized(firestoreDataset);
-    setEmployees(hydrated.employees);
+    setEmployees(applyLocalEmployeePasswords(hydrated.employees));
     setKiosks(hydrated.kiosks);
     if (firestoreAccessRules && Object.keys(firestoreAccessRules).length > 0) {
       setAccessRules(firestoreAccessRules);
@@ -1544,7 +1579,7 @@ const Dashboard = ({
     fetchWorkingData(hydrated.workingData, hydrated.drSalesData);
     setIsEmployeesLoading(false);
     setIsChannelsLoading(false);
-  }, [isAuthReady, isLoadingFirestore, firestoreReadError, firestoreDataset, firestoreAccessRules]);
+  }, [isAuthReady, isLoadingFirestore, firestoreReadError, firestoreDataset, firestoreAccessRules, applyLocalEmployeePasswords]);
 
   useEffect(() => {
     if (teamMembers.length > 1) {
@@ -2210,19 +2245,24 @@ const Dashboard = ({
       const docId =
         existingEmp?.doc_id ||
         padFsId("EMP", normalizedSnapshot.employees.length + 1, 3);
-      const divGroup = String(updatedFields.group || existingEmp?.division_group || "")
-        .toLowerCase()
-        .includes("veg")
-        ? ("Vegetables" as const)
-        : ("Field Corn" as const);
+      const rawDiv = String(updatedFields.group || existingEmp?.division_group || "")
+        .trim()
+        .toLowerCase();
+      const divGroup: "Field Corn" | "Vegetables" | "All" =
+        rawDiv === "all"
+          ? "All"
+          : rawDiv.includes("veg")
+            ? "Vegetables"
+            : "Field Corn";
       const pos = String(updatedFields.position || existingEmp?.position || "Business Solution");
       const roleLevel = Number(updatedFields.level) || existingEmp?.role_level || 1;
+      const cleanUsername = String(updatedFields.user || existingEmp?.username || "").trim().toLowerCase();
 
       await upsertEmployeeFirestore(
         firebaseUser,
         {
           doc_id: docId,
-          username: String(updatedFields.user || existingEmp?.username || "").toLowerCase(),
+          username: cleanUsername,
           full_name: updatedFields.name || existingEmp?.full_name || docId,
           position: pos,
           role_level: Math.min(5, Math.max(1, roleLevel)),
@@ -2238,6 +2278,18 @@ const Dashboard = ({
         },
         isAdd || !existingEmp,
       );
+
+      if (updatedFields.password) {
+        try {
+          const savedMap = JSON.parse(localStorage.getItem("radar_emp_passwords") || "{}");
+          savedMap[docId] = String(updatedFields.password);
+          if (cleanUsername) savedMap[cleanUsername] = String(updatedFields.password);
+          localStorage.setItem("radar_emp_passwords", JSON.stringify(savedMap));
+        } catch {
+          // ignore localStorage errors
+        }
+      }
+
       setEmployeeEditModal({ isOpen: false, item: null });
       setConsolidationSuccessMsg("Data karyawan berhasil disimpan ke Firestore.");
       setTimeout(() => setConsolidationSuccessMsg(""), 4000);
@@ -5741,6 +5793,232 @@ const Dashboard = ({
   }, [categoryDistributionStats]);
 
 
+  const SHORTCUT_ROLES = useMemo(
+    () => [
+      {
+        key: "Business Analyst" as const,
+        label: "Business Analyst",
+        fallback: {
+          name: "Aditya Wiratama",
+          user: "adityahead",
+          email: "adityahead",
+          position: "Business Analyst",
+          level: "5",
+          group: "All",
+          province: "Head Office",
+          area: "Head Office",
+          upline: "-",
+        },
+      },
+      {
+        key: "Commercial Lead" as const,
+        label: "Commercial Lead",
+        fallback: {
+          name: "Commercial Lead",
+          user: "commerciallead",
+          email: "commerciallead",
+          position: "Commercial Lead",
+          level: "4",
+          group: "All",
+          province: "Head Office",
+          area: "Head Office",
+          upline: "-",
+        },
+      },
+      {
+        key: "Sales Agronomist" as const,
+        label: "Sales Agronomist",
+        fallback: {
+          name: "Sales Agronomist",
+          user: "salesagronomist",
+          email: "salesagronomist",
+          position: "Sales Agronomist",
+          level: "2",
+          group: "Field Corn",
+          province: "-",
+          area: "-",
+          upline: "-",
+        },
+      },
+      {
+        key: "Business Solution" as const,
+        label: "Business Solution",
+        fallback: {
+          name: "Business Solution",
+          user: "businesssolution",
+          email: "businesssolution",
+          position: "Business Solution",
+          level: "1",
+          group: "Field Corn",
+          province: "-",
+          area: "-",
+          upline: "-",
+        },
+      },
+    ],
+    [],
+  );
+
+  const getEmployeesForShortcutRole = useCallback(
+    (roleKey: string) => {
+      const list = (employees || []).filter((e: any) => {
+        const st = String(e.status || "Aktif").toLowerCase();
+        if (st.includes("non")) return false;
+        const posClean = cleanForMatch(e.position || "");
+        const userClean = cleanForMatch(e.user || e.email || "");
+        const lvl = String(e.level || "").trim();
+
+        if (roleKey === "Business Analyst") {
+          return (
+            userClean === "adityahead" ||
+            posClean.includes("businessanalyst") ||
+            posClean === "analyst" ||
+            posClean.includes("admin") ||
+            posClean.includes("countryhead") ||
+            lvl === "5"
+          );
+        }
+        if (roleKey === "Commercial Lead") {
+          return (
+            posClean.includes("commerciallead") ||
+            posClean.includes("vegetablessalesmanager") ||
+            (posClean.includes("salesmanager") && !posClean.includes("area")) ||
+            lvl === "4"
+          );
+        }
+        if (roleKey === "Sales Agronomist") {
+          return posClean.includes("salesagronomist") || lvl === "2";
+        }
+        if (roleKey === "Business Solution") {
+          return posClean.includes("businesssolution") || lvl === "1";
+        }
+        return false;
+      });
+
+      return [...list].sort((a: any, b: any) => {
+        const aIsAditya = cleanForMatch(a.user || "") === "adityahead" ? -1 : 0;
+        const bIsAditya = cleanForMatch(b.user || "") === "adityahead" ? -1 : 0;
+        if (aIsAditya !== bIsAditya) return aIsAditya - bIsAditya;
+        return String(a.name || "").localeCompare(String(b.name || ""));
+      });
+    },
+    [employees],
+  );
+
+  const activeShortcutRole = useMemo(() => {
+    if (!userData || userData.isPublic) return null;
+    const posClean = cleanForMatch(userData.position || "");
+    const userClean = cleanForMatch(userData.user || "");
+    if (
+      userClean === "adityahead" ||
+      posClean.includes("businessanalyst") ||
+      posClean === "analyst" ||
+      posClean.includes("admin") ||
+      posClean.includes("countryhead")
+    ) {
+      return "Business Analyst";
+    }
+    if (
+      posClean.includes("commerciallead") ||
+      posClean.includes("vegetablessalesmanager") ||
+      (posClean.includes("salesmanager") && !posClean.includes("area"))
+    ) {
+      return "Commercial Lead";
+    }
+    if (posClean.includes("salesagronomist")) {
+      return "Sales Agronomist";
+    }
+    if (posClean.includes("businesssolution")) {
+      return "Business Solution";
+    }
+    return null;
+  }, [userData]);
+
+  const applyShortcutEmployee = useCallback(
+    (emp: any, overrideRole?: string) => {
+      if (!setUserData || !emp) return;
+      const username = String(
+        emp.user || emp.email || cleanForMatch(emp.name || "user"),
+      )
+        .trim()
+        .toLowerCase();
+      const pos = String(emp.position || overrideRole || "Business Solution").trim();
+      const rank = getPositionRank(pos);
+      const fallbackLvl =
+        rank === 1 ? "5" : rank === 2 ? "4" : rank === 3 ? "3" : rank === 4 ? "2" : "1";
+
+      setUserData({
+        name: String(emp.name || username),
+        user: username,
+        email: String(emp.email || username),
+        position: pos,
+        level: String(emp.level || fallbackLvl),
+        group: emp.group || emp.division_group || "Field Corn",
+        division: emp.group || emp.division_group || "Field Corn",
+        province: emp.province || "-",
+        area: emp.area || emp.province || "-",
+        office: emp.area || emp.province || "-",
+        reportTo: emp.upline || "-",
+        isPublic: false,
+        isShortcutSession: true,
+      });
+      setFilterBelowTeam?.("All");
+      setChannelsRefreshKey((k) => k + 1);
+    },
+    [setUserData, setFilterBelowTeam],
+  );
+
+  const handleShortcutRoleClick = useCallback(
+    (roleKey: (typeof SHORTCUT_ROLES)[number]["key"]) => {
+      const matching = getEmployeesForShortcutRole(roleKey);
+      if (matching.length > 0) {
+        applyShortcutEmployee(matching[0], roleKey);
+      } else {
+        const meta = SHORTCUT_ROLES.find((r) => r.key === roleKey);
+        if (meta) applyShortcutEmployee(meta.fallback, roleKey);
+      }
+    },
+    [SHORTCUT_ROLES, getEmployeesForShortcutRole, applyShortcutEmployee],
+  );
+
+  const handleResetToPublicViewer = useCallback(() => {
+    if (!setUserData) return;
+    setUserData({
+      name: "RADAR User",
+      position: "Business Analyst",
+      division: "All",
+      group: "All",
+      reportTo: "-",
+      office: "Akses Terbuka",
+      area: "All Area",
+      user: "public",
+      email: "",
+      level: "5",
+      isPublic: true,
+      isShortcutSession: false,
+    });
+    setFilterBelowTeam?.("All");
+    setChannelsRefreshKey((k) => k + 1);
+  }, [setUserData, setFilterBelowTeam]);
+
+  const roleEmployeesForSelector = useMemo(() => {
+    if (!activeShortcutRole) return employees || [];
+    return getEmployeesForShortcutRole(activeShortcutRole);
+  }, [activeShortcutRole, getEmployeesForShortcutRole, employees]);
+
+  const activeUserSelectValue = useMemo(() => {
+    if (!userData || userData.isPublic) return "__PUBLIC__";
+    const uClean = cleanForMatch(userData.user || "");
+    const nClean = cleanForMatch(userData.name || "");
+    const matched = (employees || []).find(
+      (e: any) =>
+        (uClean && cleanForMatch(e.user || "") === uClean) ||
+        (nClean && cleanForMatch(e.name || "") === nClean),
+    );
+    if (matched) return String(matched.doc_id || matched.user || matched.name);
+    return `__FALLBACK__${activeShortcutRole || userData.position || ""}`;
+  }, [userData, employees, activeShortcutRole]);
+
   if (showLoader) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen supports-[min-height:100dvh]:min-h-[100dvh] bg-[#f8fafc] px-4 pb-20 animate-in fade-in duration-500">
@@ -5818,37 +6096,155 @@ const Dashboard = ({
             </div>
           </div>
 
-          <div className="flex-1 relative z-10 min-w-0 pr-2 flex flex-col gap-2">
-            <div className="flex flex-col gap-1.5">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-3 min-w-0">
-                  {greeting.imageUrl && (
-                    <img
-                      src={greeting.imageUrl}
-                      referrerPolicy="no-referrer"
-                      className="size-12 md:size-14 object-contain opacity-100 shrink-0 pointer-events-none select-none animate-rotate-sway"
-                      alt=""
-                    />
-                  )}
-                  <div className="flex-1 min-w-0 py-0.5">
-                    <p className="text-[9px] text-white/80 font-semibold uppercase tracking-widest leading-none mb-0.5">
-                      {greeting.text},
-                    </p>
-                    <h2 className="text-md md:text-lg font-bold text-white leading-tight truncate">
-                      {isAuthorizedFirebase ? userData.name : "RADAR Advanta"}
-                    </h2>
+          <div className="flex-1 relative z-10 min-w-0 pr-2 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div className="flex flex-col gap-1 min-w-0">
+              <div className="flex items-center gap-3 min-w-0">
+                {greeting.imageUrl && (
+                  <img
+                    src={greeting.imageUrl}
+                    referrerPolicy="no-referrer"
+                    className="size-11 md:size-13 object-contain opacity-100 shrink-0 pointer-events-none select-none animate-rotate-sway"
+                    alt=""
+                  />
+                )}
+                <div className="flex-1 min-w-0 py-0.5">
+                  <p className="text-[10px] text-white/80 font-semibold uppercase tracking-widest leading-none mb-1">
+                    {greeting.text},
+                  </p>
+                  <h2 className="text-base md:text-lg font-bold text-white leading-tight truncate">
+                    {isAuthorizedFirebase || !userData?.isPublic
+                      ? userData.name
+                      : "RADAR Advanta"}
+                  </h2>
+                  <div className="flex items-center flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-white/90 font-medium mt-0.5">
+                    <span className="font-semibold text-white">
+                      {isAuthorizedFirebase || !userData?.isPublic
+                        ? userData.position
+                        : "Akses Terbuka · Edit Aktif"}
+                    </span>
+                    {!userData?.isPublic && userData?.user && (
+                      <>
+                        <span aria-hidden="true" className="text-white/50">·</span>
+                        <span className="font-mono text-white/90">@{userData.user}</span>
+                      </>
+                    )}
+                    {!userData?.isPublic && userData?.province && userData.province !== "-" && (
+                      <>
+                        <span aria-hidden="true" className="text-white/50">·</span>
+                        <span>{userData.province}</span>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-[10px] md:text-xs font-bold text-white uppercase bg-white/20 px-2.5 py-1 rounded-full border border-white/20 backdrop-blur-sm truncate select-none">
-                  {isAuthorizedFirebase ? userData.position : "Akses Terbuka · Edit Aktif"}
+            </div>
+
+            {/* Shortcut Login ID Switcher */}
+            <div className="flex flex-col items-start lg:items-end gap-1.5 shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-semibold text-white/85 tracking-wide">
+                  Shortcut Login ID
                 </span>
-                {isAuthorizedFirebase && userData.province && userData.province !== "-" && (
-                  <span className="text-[10px] md:text-xs font-bold text-white/80 uppercase bg-white/10 px-2.5 py-1 rounded-full border border-white/10 backdrop-blur-sm">
-                    {userData.province}
-                  </span>
+                {!userData?.isPublic && !isAuthorizedFirebase && (
+                  <button
+                    type="button"
+                    onClick={handleResetToPublicViewer}
+                    className="text-[10px] font-semibold text-white/90 hover:text-white underline underline-offset-2 cursor-pointer"
+                  >
+                    Reset Akses Terbuka
+                  </button>
                 )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1 bg-white/15 p-1 rounded-xl border border-white/20 backdrop-blur-sm">
+                {SHORTCUT_ROLES.map((role) => {
+                  const isActive = activeShortcutRole === role.key;
+                  return (
+                    <button
+                      key={role.key}
+                      type="button"
+                      onClick={() => handleShortcutRoleClick(role.key)}
+                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                        isActive
+                          ? "bg-white text-[#154be2] shadow-sm"
+                          : "text-white/90 hover:bg-white/15 hover:text-white"
+                      }`}
+                    >
+                      {role.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center gap-1.5 w-full lg:w-auto">
+                <select
+                  aria-label="Pilih User ID Employee"
+                  value={activeUserSelectValue}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === "__PUBLIC__") {
+                      handleResetToPublicViewer();
+                      return;
+                    }
+                    const found = (employees || []).find(
+                      (emp: any) =>
+                        String(emp.doc_id || emp.user || emp.name) === val,
+                    );
+                    if (found) {
+                      applyShortcutEmployee(found);
+                    }
+                  }}
+                  className="h-8 w-full lg:w-64 bg-white/95 hover:bg-white text-[#181a2c] text-[11px] font-semibold rounded-lg px-2.5 border border-white/40 shadow-sm outline-none cursor-pointer truncate"
+                >
+                  <option value="__PUBLIC__">Akses Terbuka (Semua Data)</option>
+                  {activeUserSelectValue.startsWith("__FALLBACK__") && (
+                    <option value={activeUserSelectValue}>
+                      @{userData.user} — {userData.name} ({userData.position})
+                    </option>
+                  )}
+                  {roleEmployeesForSelector.length > 0 && (
+                    <optgroup
+                      label={
+                        activeShortcutRole
+                          ? `User ID · ${activeShortcutRole}`
+                          : "User ID Employee"
+                      }
+                    >
+                      {roleEmployeesForSelector.map((emp: any) => {
+                        const val = String(emp.doc_id || emp.user || emp.name);
+                        const uname = emp.user || emp.email || "-";
+                        return (
+                          <option key={`role-${val}`} value={val}>
+                            @{uname} — {emp.name} ({emp.position})
+                          </option>
+                        );
+                      })}
+                    </optgroup>
+                  )}
+                  {activeShortcutRole &&
+                    (employees || []).length > roleEmployeesForSelector.length && (
+                      <optgroup label="User ID Lainnya">
+                        {(employees || [])
+                          .filter(
+                            (emp: any) =>
+                              !roleEmployeesForSelector.some(
+                                (r: any) =>
+                                  String(r.doc_id || r.user || r.name) ===
+                                  String(emp.doc_id || emp.user || emp.name),
+                              ),
+                          )
+                          .map((emp: any) => {
+                            const val = String(emp.doc_id || emp.user || emp.name);
+                            const uname = emp.user || emp.email || "-";
+                            return (
+                              <option key={`all-${val}`} value={val}>
+                                @{uname} — {emp.name} ({emp.position})
+                              </option>
+                            );
+                          })}
+                      </optgroup>
+                    )}
+                </select>
               </div>
             </div>
           </div>

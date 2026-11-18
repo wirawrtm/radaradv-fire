@@ -206,7 +206,11 @@ export function buildNormalizedCollections(params: {
         : null;
     const position = clampStr(e.position || "Business Solution", 100, "Business Solution");
     const role_level = getRoleLevel(position, e.level ?? e.role_level);
-    const division_group = toStrictDivision(e.group || e.division_group || position);
+    const rawDivStr = String(e.group || e.division_group || "").trim();
+    const division_group =
+      rawDivStr.toLowerCase() === "all"
+        ? ("All" as const)
+        : toStrictDivision(rawDivStr || position);
 
     return {
       doc_id,
@@ -238,7 +242,11 @@ export function buildNormalizedCollections(params: {
   const empDocs: EmployeeFsDoc[] = baseEmpDocs.map((d) => {
     if (d.role_level >= 5) {
       const divSubs = baseEmpDocs
-        .filter((other) => other.doc_id !== d.doc_id && other.division_group === d.division_group)
+        .filter(
+          (other) =>
+            other.doc_id !== d.doc_id &&
+            (d.division_group === "All" || other.division_group === d.division_group),
+        )
         .map((other) => other.doc_id)
         .slice(0, 200);
       return {

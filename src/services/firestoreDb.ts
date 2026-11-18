@@ -984,3 +984,341 @@ export async function saveBatchActivityToFirestore(
   if (stage2Lots.length > 0) await commitInChunks(stage2Lots, 15);
   if (stage3Logs.length > 0) await commitInChunks(stage3Logs, 6);
 }
+
+/**
+ * Add a single Hybrid document directly to Firestore (/hybrids/{doc_id}).
+ */
+export async function addHybridFirestore(
+  user: User | null | undefined,
+  params: {
+    hybrid_name: string;
+    crop_type: "Field Corn" | "Vegetables";
+    existingHybrids: HybridFsDoc[];
+  },
+): Promise<HybridFsDoc> {
+  const ownerUid = user?.uid || "public";
+  const cleanName = clampStr(params.hybrid_name.toUpperCase(), 100);
+  if (!cleanName) throw new Error("Nama hybrid tidak boleh kosong.");
+
+  const existingIds = new Set(params.existingHybrids.map((h) => toValidDocId(h.doc_id)));
+  let nextNum = params.existingHybrids.length + 1;
+  let docId = `HYB-${String(nextNum++).padStart(3, "0")}`;
+  while (existingIds.has(docId)) {
+    docId = `HYB-${String(nextNum++).padStart(3, "0")}`;
+  }
+
+  const newDoc: HybridFsDoc = {
+    doc_id: docId,
+    hybrid_name: cleanName,
+    crop_type: toStrictDivision(params.crop_type),
+  };
+
+  try {
+    await setDoc(doc(db, "hybrids", docId), {
+      ...newDoc,
+      ownerUid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return newDoc;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, `hybrids/${docId}`);
+  }
+}
+
+/**
+ * Add a single Lot document directly to Firestore (/lots/{lot_no}).
+ * Automatically creates a new hybrid atomically in the same batch if hybrid_name is supplied.
+ */
+export async function addLotFirestore(
+  user: User | null | undefined,
+  params: {
+    lot_no: string;
+    hybrid_id: string | null;
+    new_hybrid_name?: string;
+    crop_type?: "Field Corn" | "Vegetables";
+    shipping_date: string;
+    exp_date: string;
+    initial_dr_kg: number;
+    existingHybrids: HybridFsDoc[];
+    existingLots?: LotFsDoc[];
+  },
+): Promise<LotFsDoc> {
+  const ownerUid = user?.uid || "public";
+  const lotNo = toValidDocId(String(params.lot_no || "").toUpperCase(), "");
+  if (!lotNo) throw new Error("Nomor Lot tidak boleh kosong.");
+
+  const batch = writeBatch(db);
+  let finalHybridId = params.hybrid_id ? toValidDocId(params.hybrid_id) : null;
+
+  if (!finalHybridId && params.new_hybrid_name?.trim()) {
+    const hybName = clampStr(params.new_hybrid_name.toUpperCase(), 100);
+    const existing = params.existingHybrids.find(
+      (h) => cleanForMatch(h.hybrid_name) === cleanForMatch(hybName),
+    );
+    if (existing) {
+      finalHybridId = existing.doc_id;
+    } else {
+      const existingIds = new Set(params.existingHybrids.map((h) => toValidDocId(h.doc_id)));
+      let nextNum = params.existingHybrids.length + 1;
+      let hybId = `HYB-${String(nextNum++).padStart(3, "0")}`;
+      while (existingIds.has(hybId)) {
+        hybId = `HYB-${String(nextNum++).padStart(3, "0")}`;
+      }
+      finalHybridId = hybId;
+      batch.set(doc(db, "hybrids", hybId), {
+        doc_id: hybId,
+        hybrid_name: hybName,
+        crop_type: toStrictDivision(params.crop_type),
+        ownerUid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+  }
+
+  const numDr = Number(params.initial_dr_kg);
+  const newLot: LotFsDoc = {
+    doc_id: lotNo,
+    hybrid_id: finalHybridId,
+    shipping_date: clampStr(toIsoDateStr(params.shipping_date), 20),
+    exp_date: clampStr(toIsoDateStr(params.exp_date || extractExpFromLot(lotNo)), 20),
+    initial_dr_kg: Number.isFinite(numDr) && numDr >= 0 ? numDr : 0,
+  };
+
+  const existingLot = (params.existingLots || []).find((l) => toValidDocId(l.doc_id) === lotNo);
+  if (existingLot) {
+    batch.update(doc(db, "lots", lotNo), {
+      hybrid_id: newLot.hybrid_id,
+      shipping_date: newLot.shipping_date,
+      exp_date: newLot.exp_date,
+      initial_dr_kg: newLot.initial_dr_kg,
+      updatedAt: serverTimestamp(),
+    });
+  } else {
+    batch.set(doc(db, "lots", lotNo), {
+      ...newLot,
+      ownerUid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  try {
+    await batch.commit();
+    return newLot;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, `lots/${lotNo}`);
+  }
+}
+
+/**
+ * Add a single DR Shipment document directly to Firestore (/dr_shipments/{doc_id}).
+ * Atomically ensures referenced /lots/{lot_no} exists so existsAfter() succeeds.
+ */
+export async function addDrShipmentFirestore(
+  user: User | null | undefined,
+  params: {
+    shipping_date: string;
+    partner_id: string | null;
+    lot_no: string;
+    exp_date: string;
+    shipped_qty_kg: number;
+    hybrid_id?: string | null;
+    existingLots: LotFsDoc[];
+    existingDrShipments: DrShipmentFsDoc[];
+  },
+): Promise<DrShipmentFsDoc> {
+  const ownerUid = user?.uid || "public";
+  const lotNo = toValidDocId(String(params.lot_no || "").toUpperCase(), "");
+  if (!lotNo) throw new Error("Nomor Lot wajib diisi.");
+
+  const shippingDate = clampStr(
+    toIsoDateStr(params.shipping_date) || new Date().toISOString().slice(0, 10),
+    20,
+    "2026-01-01",
+  );
+  const expDate = clampStr(toIsoDateStr(params.exp_date || extractExpFromLot(lotNo)), 20);
+  const numQty = Number(params.shipped_qty_kg);
+  const qtyKg = Number.isFinite(numQty) && numQty >= 0 ? numQty : 0;
+
+  const existingLot = params.existingLots.find((l) => toValidDocId(l.doc_id) === lotNo);
+  const existingDrIds = new Set(params.existingDrShipments.map((d) => toValidDocId(d.doc_id)));
+  let nextDrNum = params.existingDrShipments.length + 1;
+  let drId = `DR-${String(nextDrNum++).padStart(4, "0")}`;
+  while (existingDrIds.has(drId)) {
+    drId = `DR-${String(nextDrNum++).padStart(4, "0")}`;
+  }
+
+  const batch = writeBatch(db);
+  if (!existingLot) {
+    batch.set(doc(db, "lots", lotNo), {
+      doc_id: lotNo,
+      hybrid_id: params.hybrid_id ? toValidDocId(params.hybrid_id) : null,
+      shipping_date: shippingDate,
+      exp_date: expDate,
+      initial_dr_kg: qtyKg,
+      ownerUid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } else {
+    batch.update(doc(db, "lots", lotNo), {
+      initial_dr_kg: (existingLot.initial_dr_kg || 0) + qtyKg,
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  const newDr: DrShipmentFsDoc = {
+    doc_id: drId,
+    shipping_date: shippingDate,
+    partner_id: params.partner_id ? toValidDocId(params.partner_id) : null,
+    lot_no: lotNo,
+    exp_date: expDate,
+    shipped_qty_kg: qtyKg,
+  };
+
+  batch.set(doc(db, "dr_shipments", drId), {
+    ...newDr,
+    ownerUid,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  try {
+    await batch.commit();
+    return newDr;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, `dr_shipments/${drId}`);
+  }
+}
+
+/**
+ * Add or update a single Opname Log document in Firestore (/opname_logs/{doc_id}).
+ */
+export async function addOpnameLogFirestore(
+  user: User | null | undefined,
+  params: {
+    partner_id: string | null;
+    lot_no: string;
+    checker_id: string | null;
+    crop_year: string;
+    monthKey: (typeof FISCAL_MONTH_COLS)[number]["key"];
+    inKg: number;
+    idleKg: number;
+    pogKg: number;
+    existingLots: LotFsDoc[];
+    existingLogs: OpnameLogFsDoc[];
+  },
+): Promise<void> {
+  const ownerUid = user?.uid || "public";
+  const lotNo = toValidDocId(String(params.lot_no || "").toUpperCase(), "");
+  if (!lotNo) throw new Error("Nomor Lot wajib diisi.");
+
+  const partnerId = params.partner_id ? toValidDocId(params.partner_id) : null;
+  const checkerId = params.checker_id ? toValidDocId(params.checker_id) : null;
+  const cropYear = clampStr(params.crop_year || "FY2026", 12, "FY2026");
+  const logId = toValidDocId(`${partnerId || "NO_PRT"}_${lotNo}_${cropYear}`);
+
+  const cell: MonthlyOpnameCell = {
+    in: Math.max(0, Number(params.inKg) || 0),
+    idle: Math.max(0, Number(params.idleKg) || 0),
+    pog: Math.max(0, Number(params.pogKg) || 0),
+  };
+
+  const existingLot = params.existingLots.find((l) => toValidDocId(l.doc_id) === lotNo);
+  const existingLog = params.existingLogs.find((l) => toValidDocId(l.doc_id) === logId);
+
+  const batch = writeBatch(db);
+  if (!existingLot) {
+    batch.set(doc(db, "lots", lotNo), {
+      doc_id: lotNo,
+      hybrid_id: null,
+      shipping_date: "",
+      exp_date: clampStr(toIsoDateStr(extractExpFromLot(lotNo)), 20),
+      initial_dr_kg: 0,
+      ownerUid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  const logRef = doc(db, "opname_logs", logId);
+  if (existingLog) {
+    batch.update(logRef, {
+      partner_id: partnerId,
+      lot_no: lotNo,
+      checker_id: checkerId ?? existingLog.checker_id ?? null,
+      crop_year: cropYear,
+      [params.monthKey]: cell,
+      updatedAt: serverTimestamp(),
+    });
+  } else {
+    const payload: Record<string, any> = {
+      doc_id: logId,
+      partner_id: partnerId,
+      lot_no: lotNo,
+      checker_id: checkerId,
+      crop_year: cropYear,
+      ownerUid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+    FISCAL_MONTH_COLS.forEach(({ key }) => {
+      payload[key] = key === params.monthKey ? cell : null;
+    });
+    batch.set(logRef, payload);
+  }
+
+  try {
+    await batch.commit();
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `opname_logs/${logId}`);
+  }
+}
+
+/**
+ * Ensure Super User employee `adityahead` (Business Analyst, Lv.5) exists in Firestore /employees.
+ */
+export async function ensureSuperUserAdityaFirestore(
+  user: User | null | undefined,
+  existingEmployees: EmployeeFsDoc[],
+): Promise<boolean> {
+  const alreadyExists = existingEmployees.some(
+    (e) =>
+      cleanForMatch(e.username) === "adityahead" ||
+      e.doc_id === "EMP-ADITYAHEAD",
+  );
+  if (alreadyExists) return false;
+
+  const existingIds = new Set(existingEmployees.map((e) => e.doc_id));
+  let docId = "EMP-001";
+  if (existingIds.has(docId)) {
+    docId = "EMP-ADITYAHEAD";
+  }
+
+  const subIds = existingEmployees
+    .filter((e) => e.doc_id !== docId)
+    .map((e) => toValidDocId(e.doc_id))
+    .slice(0, 200);
+
+  await upsertEmployeeFirestore(
+    user,
+    {
+      doc_id: docId,
+      username: "adityahead",
+      full_name: "Aditya Wiratama",
+      position: "Business Analyst",
+      role_level: 5,
+      upline_id: null,
+      subordinate_ids: subIds,
+      access_scope_ids: [docId, ...subIds].slice(0, 200),
+      division_group: "All",
+      province: "Head Office",
+      area: "Head Office",
+      status: "Aktif",
+    },
+    true,
+  );
+  return true;
+}
