@@ -43,12 +43,14 @@ export interface PartnerFsDoc {
 export interface HybridFsDoc {
   doc_id: string;
   hybrid_name: string;
+  sku?: string | null;
   crop_type: DivisionStrict;
 }
 
 export interface LotFsDoc {
   doc_id: string;
   hybrid_id: string | null;
+  sku?: string | null;
   shipping_date: string;
   exp_date: string;
   initial_dr_kg: number;
@@ -59,6 +61,7 @@ export interface DrShipmentFsDoc {
   shipping_date: string;
   partner_id: string | null;
   lot_no: string;
+  sku?: string | null;
   exp_date: string;
   shipped_qty_kg: number;
 }
@@ -68,6 +71,7 @@ export interface OpnameLogFsDoc {
   _key: string;
   partner_id: string | null;
   lot_no: string;
+  sku?: string | null;
   checker_id: string | null;
   crop_year: string;
   apr: MonthlyOpnameCell | null;
@@ -686,6 +690,7 @@ export function hydrateDashboardFromNormalized(data: NormalizedDataset): {
     return {
       doc_id: dr.doc_id,
       lot: dr.lot_no,
+      sku: dr.sku || lot?.sku || hybrid?.sku || "",
       hybrid: hybrid?.hybrid_name || "Unknown",
       crops: hybrid?.crop_type || partner?.division_group || "Field Corn",
       channel: partner?.partner_name || "",
@@ -711,6 +716,7 @@ export function hydrateDashboardFromNormalized(data: NormalizedDataset): {
       doc_id: log.doc_id,
       rowNumber: index + 1,
       lot: log.lot_no,
+      sku: log.sku || lot?.sku || hybrid?.sku || "",
       hybrid: hybrid?.hybrid_name || "Unknown",
       crops: hybrid?.crop_type || partner?.division_group || "Field Corn",
       drDate: lot?.shipping_date || "N/A",

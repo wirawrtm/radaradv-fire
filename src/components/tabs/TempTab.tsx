@@ -585,6 +585,7 @@ export const TempTab: React.FC<TempTabProps> = ({
       const docs = firestoreDataset.hybrids.map((h) => ({
         doc_id: h.doc_id,
         hybrid_name: h.hybrid_name,
+        sku: h.sku || "",
         crop_type: toStrictDivision(h.crop_type),
       }));
       const lookup = new Map<string, (typeof docs)[0]>();
@@ -592,7 +593,7 @@ export const TempTab: React.FC<TempTabProps> = ({
       return { hybridsCol: docs, hybridByClean: lookup };
     }
 
-    const map = new Map<string, { hybrid_name: string; crop_type: "Field Corn" | "Vegetables" }>();
+    const map = new Map<string, { hybrid_name: string; sku: string; crop_type: "Field Corn" | "Vegetables" }>();
 
     mergedDrSales.forEach((d) => {
       const hName = String(d.hybrid || "").trim().toUpperCase();
@@ -601,6 +602,7 @@ export const TempTab: React.FC<TempTabProps> = ({
       if (!map.has(ck)) {
         map.set(ck, {
           hybrid_name: hName,
+          sku: String(d.sku || "").trim(),
           crop_type: toStrictDivision(d.crops),
         });
       }
@@ -613,6 +615,7 @@ export const TempTab: React.FC<TempTabProps> = ({
       if (!map.has(ck)) {
         map.set(ck, {
           hybrid_name: hName,
+          sku: String(w.sku || "").trim(),
           crop_type: toStrictDivision(w.crops),
         });
       }
@@ -625,6 +628,7 @@ export const TempTab: React.FC<TempTabProps> = ({
     const docs = sorted.map((h, i) => ({
       doc_id: padId("HYB", i + 1, 3),
       hybrid_name: h.hybrid_name,
+      sku: h.sku,
       crop_type: h.crop_type,
     }));
 
@@ -640,6 +644,7 @@ export const TempTab: React.FC<TempTabProps> = ({
         lotsCol: firestoreDataset.lots.map((l) => ({
           doc_id: l.doc_id,
           hybrid_id: l.hybrid_id || null,
+          sku: l.sku || "",
           shipping_date: l.shipping_date || "",
           exp_date: l.exp_date || "",
           initial_dr_kg: Number(l.initial_dr_kg) || 0,
@@ -649,6 +654,7 @@ export const TempTab: React.FC<TempTabProps> = ({
           shipping_date: d.shipping_date || "",
           partner_id: d.partner_id || null,
           lot_no: d.lot_no || "",
+          sku: d.sku || "",
           exp_date: d.exp_date || "",
           shipped_qty_kg: Number(d.shipped_qty_kg) || 0,
         })),
@@ -660,6 +666,7 @@ export const TempTab: React.FC<TempTabProps> = ({
       {
         doc_id: string;
         hybrid_id: string | null;
+        sku: string;
         shipping_date: string;
         exp_date: string;
         initial_dr_kg: number;
@@ -672,6 +679,7 @@ export const TempTab: React.FC<TempTabProps> = ({
       shipping_date: string;
       partner_id: string | null;
       lot_no: string;
+      sku: string;
       exp_date: string;
       shipped_qty_kg: number;
     }> = [];
@@ -716,6 +724,7 @@ export const TempTab: React.FC<TempTabProps> = ({
         shipping_date: shipping_date || "2026-01-01",
         partner_id: partner ? partner.doc_id : null,
         lot_no,
+        sku: String(d.sku || "").trim(),
         exp_date: exp_date || "",
         shipped_qty_kg,
       });
@@ -726,6 +735,7 @@ export const TempTab: React.FC<TempTabProps> = ({
           lotMap.set(cl, {
             doc_id: lot_no,
             hybrid_id: hyb ? hyb.doc_id : null,
+            sku: String(d.sku || hyb?.sku || "").trim(),
             shipping_date: shipping_date || "",
             exp_date: exp_date || "",
             initial_dr_kg: shipped_qty_kg,
@@ -734,6 +744,7 @@ export const TempTab: React.FC<TempTabProps> = ({
           existing.initial_dr_kg += shipped_qty_kg;
           if (!existing.shipping_date && shipping_date) existing.shipping_date = shipping_date;
           if (!existing.exp_date && exp_date) existing.exp_date = exp_date;
+          if (!existing.sku && d.sku) existing.sku = String(d.sku).trim();
         }
       }
     });
@@ -751,6 +762,7 @@ export const TempTab: React.FC<TempTabProps> = ({
         lotMap.set(cl, {
           doc_id: lot_no,
           hybrid_id: hyb ? hyb.doc_id : null,
+          sku: String(w.sku || hyb?.sku || "").trim(),
           shipping_date: shipping_date || "",
           exp_date: exp_date || "",
           initial_dr_kg: 0,
@@ -759,6 +771,7 @@ export const TempTab: React.FC<TempTabProps> = ({
         if (!existing.hybrid_id && hyb) existing.hybrid_id = hyb.doc_id;
         if (!existing.shipping_date && shipping_date) existing.shipping_date = shipping_date;
         if (!existing.exp_date && exp_date) existing.exp_date = exp_date;
+        if (!existing.sku && w.sku) existing.sku = String(w.sku).trim();
       }
     });
 
@@ -776,6 +789,7 @@ export const TempTab: React.FC<TempTabProps> = ({
         _key: l.doc_id,
         partner_id: l.partner_id || null,
         lot_no: l.lot_no || "",
+        sku: l.sku || "",
         checker_id: l.checker_id || null,
         crop_year: l.crop_year || "FY2026",
         apr: l.apr || null,
@@ -885,6 +899,7 @@ export const TempTab: React.FC<TempTabProps> = ({
       _key: string;
       partner_id: string | null;
       lot_no: string;
+      sku: string;
       checker_id: string | null;
       crop_year: string;
       apr: MonthlyOpnameCell | null;
@@ -941,6 +956,7 @@ export const TempTab: React.FC<TempTabProps> = ({
         _key: logDocId,
         partner_id: inv.partner_id,
         lot_no: inv.lot_no,
+        sku: "",
         checker_id: inv.last_checker_id,
         crop_year: "FY2026",
         apr: monthCells.apr,
@@ -1299,6 +1315,7 @@ export const TempTab: React.FC<TempTabProps> = ({
         const drDate = formatCellDate(getVal(row, ["shipping_date", "dr_date", "drdate", "tanggal_kirim", "date"]));
         const expDate = formatCellDate(getVal(row, ["exp_date", "expired", "exp", "kadaluarsa"]));
         const hybrid = String(getVal(row, ["hybrid", "varietas", "material", "produk"]) || "ADV808").trim().toUpperCase();
+        const sku = String(getVal(row, ["sku", "kode_sku", "item_code", "material_code"]) || "").trim().toUpperCase();
         const cropsRaw = String(getVal(row, ["crops", "crop", "division", "divisi"]) || effectiveDivision);
 
         const ck = cleanForMatch(partnerName);
@@ -1318,6 +1335,7 @@ export const TempTab: React.FC<TempTabProps> = ({
         parsed.push({
           channel: found ? found.partner_name : partnerName,
           lot: lotNo,
+          sku,
           qty,
           drDate: drDate || new Date().toISOString().slice(0, 10),
           expired: expDate || extractExpFromLot(lotNo) || "",
@@ -1362,6 +1380,7 @@ export const TempTab: React.FC<TempTabProps> = ({
         shipping_date: "2026-05-12",
         nama_partner: samplePartner,
         lot_no: "NLE1B1099",
+        sku: "5 KG",
         exp_date: "2027-05-12",
         shipped_qty_kg: 500,
         hybrid: effectiveDivision === "Vegetables" ? "LAVANTA" : "ADV808",
@@ -1392,6 +1411,7 @@ export const TempTab: React.FC<TempTabProps> = ({
           const row: Record<string, any> = {
             partner_id: l.partner_id,
             lot_no: l.lot_no,
+            sku: l.sku || "",
             checker_id: l.checker_id,
             crop_year: l.crop_year,
           };
@@ -1481,6 +1501,15 @@ export const TempTab: React.FC<TempTabProps> = ({
     return 1;
   }, []);
 
+  const lotLookupMap = useMemo(
+    () => new Map(lotsCol.map((l) => [l.doc_id.toUpperCase(), l])),
+    [lotsCol],
+  );
+  const hybridLookupMap = useMemo(
+    () => new Map(hybridsCol.map((h) => [h.doc_id, h])),
+    [hybridsCol],
+  );
+
   const createEmptyDraftRow = useCallback(
     (colKey: CollectionKey) => {
       const _draftId = `draft_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -1490,13 +1519,14 @@ export const TempTab: React.FC<TempTabProps> = ({
       const defaultHybridId = hybridsCol[0]?.doc_id || "";
 
       if (colKey === "hybrids") {
-        return { _draftId, hybrid_name: "", crop_type: effectiveDivision };
+        return { _draftId, hybrid_name: "", sku: "", crop_type: effectiveDivision };
       }
       if (colKey === "lots") {
         return {
           _draftId,
           lot_no: "",
           hybrid_id: defaultHybridId,
+          sku: hybridsCol[0]?.sku || "",
           shipping_date: todayIso,
           exp_date: "",
           initial_dr_kg: "0",
@@ -1508,6 +1538,7 @@ export const TempTab: React.FC<TempTabProps> = ({
           shipping_date: todayIso,
           partner_id: defaultPartnerId,
           lot_no: "",
+          sku: "",
           exp_date: "",
           shipped_qty_kg: "0",
         };
@@ -1521,6 +1552,7 @@ export const TempTab: React.FC<TempTabProps> = ({
           _draftId,
           partner_id: defaultPartnerId,
           lot_no: "",
+          sku: "",
           checker_id: defaultEmpId,
           crop_year: "FY2026",
           months,
@@ -1574,14 +1606,21 @@ export const TempTab: React.FC<TempTabProps> = ({
         [colKey]: prev[colKey].map((row) => {
           if (row._draftId !== draftId) return row;
           const next = { ...row, ...patch };
-          if ((colKey === "lots" || colKey === "dr_shipments") && typeof patch.lot_no === "string") {
+          if ((colKey === "lots" || colKey === "dr_shipments" || colKey === "opname_logs") && typeof patch.lot_no === "string") {
             const upperLot = patch.lot_no.toUpperCase();
             next.lot_no = upperLot;
-            if (!row.exp_date || row.exp_date === extractExpFromLot(row.lot_no || "")) {
-              const matchedLot = lotsCol.find((l) => l.doc_id.toUpperCase() === upperLot.trim());
+            const matchedLot = lotsCol.find((l) => l.doc_id.toUpperCase() === upperLot.trim());
+            if ((colKey === "lots" || colKey === "dr_shipments") && (!row.exp_date || row.exp_date === extractExpFromLot(row.lot_no || ""))) {
               const derived = matchedLot?.exp_date || extractExpFromLot(upperLot);
               if (derived && derived !== "N/A") next.exp_date = derived;
             }
+            if (!row.sku && matchedLot?.sku) {
+              next.sku = matchedLot.sku;
+            }
+          }
+          if (colKey === "lots" && typeof patch.hybrid_id === "string" && !row.sku) {
+            const matchedHyb = hybridLookupMap.get(patch.hybrid_id);
+            if (matchedHyb?.sku) next.sku = matchedHyb.sku;
           }
           if (colKey === "employees" && typeof patch.position === "string") {
             next.role_level = getEmployeeLevelFromPos(patch.position);
@@ -1590,7 +1629,7 @@ export const TempTab: React.FC<TempTabProps> = ({
         }),
       }));
     },
-    [lotsCol, getEmployeeLevelFromPos],
+    [lotsCol, hybridLookupMap, getEmployeeLevelFromPos],
   );
 
   const handleUpdateOpnameMonthCell = useCallback(
@@ -1667,6 +1706,7 @@ export const TempTab: React.FC<TempTabProps> = ({
           firebaseUser,
           drafts.map((d) => ({
             hybrid_name: d.hybrid_name,
+            sku: d.sku || "",
             crop_type: d.crop_type,
           })),
           fsHybrids,
@@ -1677,6 +1717,7 @@ export const TempTab: React.FC<TempTabProps> = ({
           drafts.map((d) => ({
             lot_no: d.lot_no,
             hybrid_id: d.hybrid_id || null,
+            sku: d.sku || "",
             shipping_date: d.shipping_date,
             exp_date: d.exp_date,
             initial_dr_kg: Number(d.initial_dr_kg) || 0,
@@ -1690,6 +1731,7 @@ export const TempTab: React.FC<TempTabProps> = ({
             shipping_date: d.shipping_date,
             partner_id: d.partner_id || null,
             lot_no: d.lot_no,
+            sku: d.sku || "",
             exp_date: d.exp_date,
             shipped_qty_kg: Number(d.shipped_qty_kg) || 0,
           })),
@@ -1719,6 +1761,7 @@ export const TempTab: React.FC<TempTabProps> = ({
             return {
               partner_id: d.partner_id || null,
               lot_no: d.lot_no,
+              sku: d.sku || "",
               checker_id: d.checker_id || null,
               crop_year: d.crop_year || "FY2026",
               months: parsedMonths,
@@ -1807,6 +1850,8 @@ export const TempTab: React.FC<TempTabProps> = ({
     labels: string[];
   } | null>(null);
   const [isDeletingRows, setIsDeletingRows] = useState(false);
+  const [pasteModalOpen, setPasteModalOpen] = useState(false);
+  const [pasteModalText, setPasteModalText] = useState("");
 
   const buildEditRowDraft = useCallback((colKey: CollectionKey, row: any) => {
     if (colKey === "opname_logs") {
@@ -1821,6 +1866,8 @@ export const TempTab: React.FC<TempTabProps> = ({
         doc_id: row.doc_id || row._key,
         partner_id: row.partner_id || "",
         lot_no: row.lot_no || "",
+        sku: row.sku || "",
+        _hadSku: Boolean(row.sku),
         checker_id: row.checker_id || "",
         crop_year: row.crop_year || "FY2026",
         months,
@@ -1832,6 +1879,8 @@ export const TempTab: React.FC<TempTabProps> = ({
         shipping_date: row.shipping_date || "",
         partner_id: row.partner_id || "",
         lot_no: row.lot_no || "",
+        sku: row.sku || "",
+        _hadSku: Boolean(row.sku),
         exp_date: row.exp_date || "",
         shipped_qty_kg: String(row.shipped_qty_kg ?? 0),
       };
@@ -1840,6 +1889,8 @@ export const TempTab: React.FC<TempTabProps> = ({
       return {
         doc_id: row.doc_id,
         hybrid_id: row.hybrid_id || "",
+        sku: row.sku || "",
+        _hadSku: Boolean(row.sku),
         shipping_date: row.shipping_date || "",
         exp_date: row.exp_date || "",
         initial_dr_kg: String(row.initial_dr_kg ?? 0),
@@ -1849,6 +1900,8 @@ export const TempTab: React.FC<TempTabProps> = ({
       return {
         doc_id: row.doc_id,
         hybrid_name: row.hybrid_name || "",
+        sku: row.sku || "",
+        _hadSku: Boolean(row.sku),
         crop_type: row.crop_type || "Field Corn",
       };
     }
@@ -1923,12 +1976,21 @@ export const TempTab: React.FC<TempTabProps> = ({
         const existingRow = prev[colKey]?.[docId];
         if (!existingRow) return prev;
         const nextRow = { ...existingRow, ...patch };
-        if (colKey === "dr_shipments" && typeof patch.lot_no === "string") {
+        if ((colKey === "dr_shipments" || colKey === "opname_logs") && typeof patch.lot_no === "string") {
           const upperLot = patch.lot_no.toUpperCase();
           nextRow.lot_no = upperLot;
           const matchedLot = lotsCol.find((l) => l.doc_id.toUpperCase() === upperLot.trim());
-          const derived = matchedLot?.exp_date || extractExpFromLot(upperLot);
-          if (derived && derived !== "N/A") nextRow.exp_date = derived;
+          if (colKey === "dr_shipments") {
+            const derived = matchedLot?.exp_date || extractExpFromLot(upperLot);
+            if (derived && derived !== "N/A") nextRow.exp_date = derived;
+          }
+          if (!existingRow.sku && matchedLot?.sku) {
+            nextRow.sku = matchedLot.sku;
+          }
+        }
+        if (colKey === "lots" && typeof patch.hybrid_id === "string" && !existingRow.sku) {
+          const matchedHyb = hybridLookupMap.get(patch.hybrid_id);
+          if (matchedHyb?.sku) nextRow.sku = matchedHyb.sku;
         }
         if (colKey === "employees" && typeof patch.position === "string") {
           nextRow.role_level = getEmployeeLevelFromPos(patch.position);
@@ -1942,7 +2004,7 @@ export const TempTab: React.FC<TempTabProps> = ({
         };
       });
     },
-    [lotsCol, getEmployeeLevelFromPos],
+    [lotsCol, hybridLookupMap, getEmployeeLevelFromPos],
   );
 
   const handleUpdateEditOpnameMonthCell = useCallback(
@@ -1984,6 +2046,391 @@ export const TempTab: React.FC<TempTabProps> = ({
     setInlineEdits((prev) => ({ ...prev, [colKey]: {} }));
   }, []);
 
+  // ============================================================================
+  // MULTI-ROW & MULTI-COLUMN EXCEL CLIPBOARD PASTE ENGINE
+  // ============================================================================
+  const parseExcelClipboard = useCallback((text: string): string[][] => {
+    const normalized = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const lines = normalized.split("\n");
+    if (lines.length > 1 && lines[lines.length - 1] === "") {
+      lines.pop();
+    }
+    return lines.map((line) => line.split("\t"));
+  }, []);
+
+  const getOrderedEditableFields = useCallback(
+    (colKey: CollectionKey, mode: "draft" | "edit"): string[] => {
+      if (colKey === "opname_logs") {
+        return [
+          "partner_id",
+          "lot_no",
+          "sku",
+          "checker_id",
+          "crop_year",
+          ...FISCAL_MONTH_COLS.flatMap((m) => [`${m.key}.in`, `${m.key}.idle`, `${m.key}.pog`]),
+        ];
+      }
+      if (colKey === "dr_shipments") {
+        return ["shipping_date", "partner_id", "lot_no", "sku", "exp_date", "shipped_qty_kg"];
+      }
+      if (colKey === "lots") {
+        return mode === "draft"
+          ? ["lot_no", "hybrid_id", "sku", "shipping_date", "exp_date", "initial_dr_kg"]
+          : ["hybrid_id", "sku", "shipping_date", "exp_date", "initial_dr_kg"];
+      }
+      if (colKey === "hybrids") {
+        return ["hybrid_name", "sku", "crop_type"];
+      }
+      if (colKey === "partners") {
+        return ["partner_name", "category", "pic_employee_id", "division_group", "province", "area"];
+      }
+      return mode === "draft"
+        ? ["username", "password", "full_name", "position", "upline_id", "division_group", "province", "area"]
+        : ["username", "password", "full_name", "position", "upline_id", "status", "division_group", "province", "area"];
+    },
+    [],
+  );
+
+  const parsePastedNumber = useCallback((raw: string): string => {
+    let s = String(raw || "").replace(/\s+/g, "").replace(/kg$/i, "").trim();
+    if (!s) return "";
+    const lastComma = s.lastIndexOf(",");
+    const lastDot = s.lastIndexOf(".");
+    if (lastComma !== -1 && lastDot !== -1) {
+      if (lastComma > lastDot) s = s.replace(/\./g, "").replace(",", ".");
+      else s = s.replace(/,/g, "");
+    } else if (lastComma !== -1) {
+      if (/^\d{1,3}(,\d{3})+$/.test(s)) s = s.replace(/,/g, "");
+      else s = s.replace(",", ".");
+    } else if (lastDot !== -1) {
+      if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, "");
+    }
+    const num = Number(s);
+    return Number.isFinite(num) ? String(num) : s;
+  }, []);
+
+  const resolvePartnerIdFromPaste = useCallback(
+    (raw: string): string => {
+      const trimmed = String(raw || "").trim();
+      if (!trimmed) return "";
+      const byId = partnersCol.find((p) => p.doc_id.toUpperCase() === trimmed.toUpperCase());
+      if (byId) return byId.doc_id;
+      const stripCorp = (s: string) => cleanForMatch(s).replace(/^(pt|cv|ud|toko|kios|udt|pd)+/, "");
+      const ck = cleanForMatch(trimmed);
+      const exactName = partnerByClean.get(ck);
+      if (exactName) return exactName.doc_id;
+      const stripped = stripCorp(trimmed);
+      if (stripped) {
+        const fuzzy = partnersCol.find((p) => stripCorp(p.partner_name) === stripped);
+        if (fuzzy) return fuzzy.doc_id;
+      }
+      return "";
+    },
+    [partnersCol, partnerByClean],
+  );
+
+  const resolveHybridIdFromPaste = useCallback(
+    (raw: string): string => {
+      const trimmed = String(raw || "").trim();
+      if (!trimmed) return "";
+      const byId = hybridsCol.find((h) => h.doc_id.toUpperCase() === trimmed.toUpperCase());
+      if (byId) return byId.doc_id;
+      const byName = hybridByClean.get(cleanForMatch(trimmed));
+      return byName ? byName.doc_id : "";
+    },
+    [hybridsCol, hybridByClean],
+  );
+
+  const resolveEmployeeIdFromPaste = useCallback(
+    (raw: string): string => {
+      const trimmed = String(raw || "").trim();
+      if (!trimmed) return "";
+      const byId = employeesCol.find((e) => e.doc_id.toUpperCase() === trimmed.toUpperCase());
+      if (byId) return byId.doc_id;
+      const ck = cleanForMatch(trimmed);
+      const byName = empByClean.get(ck);
+      if (byName) return byName.doc_id;
+      const byUser = employeesCol.find((e) => cleanForMatch(e.username) === ck);
+      return byUser ? byUser.doc_id : "";
+    },
+    [employeesCol, empByClean],
+  );
+
+  const applyPastedCellsToRow = useCallback(
+    (
+      colKey: CollectionKey,
+      baseRow: Record<string, any>,
+      colFields: string[],
+      startColIdx: number,
+      rowValues: string[],
+    ): Record<string, any> => {
+      const next: Record<string, any> = {
+        ...baseRow,
+        ...(baseRow.months ? { months: { ...baseRow.months } } : {}),
+      };
+      const touchedFields = new Set<string>();
+      for (let c = 0; c < rowValues.length; c++) {
+        const field = colFields[startColIdx + c];
+        if (field) touchedFields.add(field);
+      }
+
+      for (let c = 0; c < rowValues.length; c++) {
+        const field = colFields[startColIdx + c];
+        if (!field) break;
+        const rawVal = String(rowValues[c] ?? "").trim();
+
+        if (field.includes(".")) {
+          const [mKey, metric] = field.split(".") as [string, "in" | "idle" | "pog"];
+          const currentCell = next.months?.[mKey] || { in: "", idle: "", pog: "" };
+          next.months = {
+            ...(next.months || {}),
+            [mKey]: {
+              ...currentCell,
+              [metric]: parsePastedNumber(rawVal),
+            },
+          };
+          continue;
+        }
+
+        if (field === "partner_id") {
+          next.partner_id = resolvePartnerIdFromPaste(rawVal);
+        } else if (field === "hybrid_id") {
+          next.hybrid_id = resolveHybridIdFromPaste(rawVal);
+          if (!touchedFields.has("sku") && !next.sku && next.hybrid_id) {
+            const hyb = hybridLookupMap.get(next.hybrid_id);
+            if (hyb?.sku) next.sku = hyb.sku;
+          }
+        } else if (field === "checker_id" || field === "pic_employee_id" || field === "upline_id") {
+          next[field] = resolveEmployeeIdFromPaste(rawVal);
+        } else if (field === "lot_no") {
+          const upperLot = rawVal.toUpperCase();
+          next.lot_no = upperLot;
+          const matchedLot = lotLookupMap.get(upperLot);
+          if (!touchedFields.has("exp_date") && !next.exp_date) {
+            const derived = matchedLot?.exp_date || extractExpFromLot(upperLot);
+            if (derived && derived !== "N/A") next.exp_date = derived;
+          }
+          if (!touchedFields.has("sku") && !next.sku && matchedLot?.sku) {
+            next.sku = matchedLot.sku;
+          }
+        } else if (field === "sku") {
+          next.sku = rawVal.slice(0, 80);
+        } else if (field === "hybrid_name") {
+          next.hybrid_name = rawVal.toUpperCase();
+        } else if (field === "shipping_date" || field === "exp_date") {
+          next[field] = toIsoDateStr(rawVal) || rawVal;
+        } else if (field === "shipped_qty_kg" || field === "initial_dr_kg") {
+          next[field] = parsePastedNumber(rawVal) || "0";
+        } else if (field === "crop_type") {
+          next.crop_type = rawVal.toLowerCase().includes("veg") ? "Vegetables" : "Field Corn";
+        } else if (field === "division_group") {
+          if (colKey === "employees" && rawVal.toLowerCase() === "all") {
+            next.division_group = "All";
+          } else {
+            next.division_group = rawVal.toLowerCase().includes("veg") ? "Vegetables" : "Field Corn";
+          }
+        } else if (field === "status") {
+          next.status = rawVal.toLowerCase().includes("non") ? "Nonaktif" : "Aktif";
+        } else if (field === "position") {
+          next.position = rawVal || "Business Solution";
+          next.role_level = getEmployeeLevelFromPos(next.position);
+        } else if (field === "username") {
+          next.username = rawVal.toLowerCase();
+        } else {
+          next[field] = rawVal;
+        }
+      }
+      return next;
+    },
+    [
+      parsePastedNumber,
+      resolvePartnerIdFromPaste,
+      resolveHybridIdFromPaste,
+      resolveEmployeeIdFromPaste,
+      hybridLookupMap,
+      lotLookupMap,
+      getEmployeeLevelFromPos,
+    ],
+  );
+
+  const applyPastedMatrixToDrafts = useCallback(
+    (colKey: CollectionKey, startDraftIdx: number, startField: string, matrix: string[][]) => {
+      const colFields = getOrderedEditableFields(colKey, "draft");
+      const startColIdx = colFields.indexOf(startField);
+      if (startColIdx === -1 || matrix.length === 0) return;
+
+      setBulkDraftError(null);
+      setViewMode("table");
+      setInlineDrafts((prev) => {
+        const nextArr = [...(prev[colKey] || [])];
+        while (nextArr.length < startDraftIdx + matrix.length) {
+          nextArr.push(createEmptyDraftRow(colKey));
+        }
+        for (let r = 0; r < matrix.length; r++) {
+          const targetIdx = startDraftIdx + r;
+          nextArr[targetIdx] = applyPastedCellsToRow(
+            colKey,
+            nextArr[targetIdx],
+            colFields,
+            startColIdx,
+            matrix[r],
+          );
+        }
+        return { ...prev, [colKey]: nextArr };
+      });
+      showToast(`${matrix.length} baris dari Excel berhasil diisi ke tabel (${colKey}).`);
+    },
+    [getOrderedEditableFields, createEmptyDraftRow, applyPastedCellsToRow, showToast],
+  );
+
+  const handlePasteDraftCells = useCallback(
+    (
+      colKey: CollectionKey,
+      startDraftIdx: number,
+      startField: string,
+      e: React.ClipboardEvent<HTMLElement>,
+      isSelectTarget = false,
+    ) => {
+      const rawText = e.clipboardData?.getData("text/plain") ?? "";
+      if (!rawText) return;
+      const matrix = parseExcelClipboard(rawText);
+      const isMulti = matrix.length > 1 || matrix.some((r) => r.length > 1);
+      if (!isMulti && !isSelectTarget) return;
+
+      e.preventDefault();
+      applyPastedMatrixToDrafts(colKey, startDraftIdx, startField, matrix);
+    },
+    [parseExcelClipboard, applyPastedMatrixToDrafts],
+  );
+
+  const handlePasteEditCells = useCallback(
+    (
+      colKey: CollectionKey,
+      visibleRows: any[],
+      startRowIdx: number,
+      startField: string,
+      e: React.ClipboardEvent<HTMLElement>,
+      isSelectTarget = false,
+    ) => {
+      const rawText = e.clipboardData?.getData("text/plain") ?? "";
+      if (!rawText) return;
+      const matrix = parseExcelClipboard(rawText);
+      const isMulti = matrix.length > 1 || matrix.some((r) => r.length > 1);
+      if (!isMulti && !isSelectTarget) return;
+
+      e.preventDefault();
+      const editColFields = getOrderedEditableFields(colKey, "edit");
+      const draftColFields = getOrderedEditableFields(colKey, "draft");
+      const startColIdx = editColFields.indexOf(startField);
+      if (startColIdx === -1) return;
+
+      const overflowRows: string[][] = [];
+      let editedCount = 0;
+
+      setEditError(null);
+      setInlineEdits((prev) => {
+        const nextCol = { ...(prev[colKey] || {}) };
+        for (let r = 0; r < matrix.length; r++) {
+          const targetIdx = startRowIdx + r;
+          if (targetIdx < visibleRows.length) {
+            const visibleRow = visibleRows[targetIdx];
+            const docId = String(visibleRow.doc_id || visibleRow._key || "");
+            if (!docId) continue;
+            const existingDraft = nextCol[docId] || buildEditRowDraft(colKey, visibleRow);
+            nextCol[docId] = applyPastedCellsToRow(
+              colKey,
+              existingDraft,
+              editColFields,
+              startColIdx,
+              matrix[r],
+            );
+            editedCount++;
+          } else {
+            overflowRows.push(matrix[r]);
+          }
+        }
+        return { ...prev, [colKey]: nextCol };
+      });
+
+      if (overflowRows.length > 0) {
+        const draftStartIdx = Math.max(0, draftColFields.indexOf(startField));
+        setInlineDrafts((prev) => {
+          const existingDrafts = prev[colKey] || [];
+          const appended = overflowRows.map((rowVals) =>
+            applyPastedCellsToRow(
+              colKey,
+              createEmptyDraftRow(colKey),
+              draftColFields,
+              draftStartIdx,
+              rowVals,
+            ),
+          );
+          return { ...prev, [colKey]: [...existingDrafts, ...appended] };
+        });
+      }
+
+      showToast(
+        overflowRows.length > 0
+          ? `${editedCount} baris bawah terisi edit + ${overflowRows.length} baris berlebih masuk ke baris baru.`
+          : `${editedCount} baris Excel berhasil ditempel ke mode edit (${colKey}).`,
+      );
+    },
+    [
+      parseExcelClipboard,
+      getOrderedEditableFields,
+      buildEditRowDraft,
+      applyPastedCellsToRow,
+      createEmptyDraftRow,
+      showToast,
+    ],
+  );
+
+  const handleQuickPasteFromExcelButton = useCallback(async () => {
+    try {
+      if (navigator.clipboard?.readText) {
+        const clipText = await navigator.clipboard.readText();
+        if (clipText && clipText.trim() !== "") {
+          const matrix = parseExcelClipboard(clipText);
+          const colFields = getOrderedEditableFields(activeCollection, "draft");
+          const startDraftIdx = inlineDrafts[activeCollection]?.length || 0;
+          if (colFields.length > 0 && matrix.length > 0) {
+            applyPastedMatrixToDrafts(activeCollection, startDraftIdx, colFields[0], matrix);
+            return;
+          }
+        }
+      }
+    } catch {
+      // Clipboard read permission denied in iframe/browser; open manual paste box fallback
+    }
+    setPasteModalText("");
+    setPasteModalOpen(true);
+  }, [
+    activeCollection,
+    inlineDrafts,
+    parseExcelClipboard,
+    getOrderedEditableFields,
+    applyPastedMatrixToDrafts,
+  ]);
+
+  const handleApplyPasteModal = useCallback(() => {
+    if (!pasteModalText.trim()) return;
+    const matrix = parseExcelClipboard(pasteModalText);
+    const colFields = getOrderedEditableFields(activeCollection, "draft");
+    const startDraftIdx = inlineDrafts[activeCollection]?.length || 0;
+    if (colFields.length > 0 && matrix.length > 0) {
+      applyPastedMatrixToDrafts(activeCollection, startDraftIdx, colFields[0], matrix);
+    }
+    setPasteModalOpen(false);
+    setPasteModalText("");
+  }, [
+    pasteModalText,
+    activeCollection,
+    inlineDrafts,
+    parseExcelClipboard,
+    getOrderedEditableFields,
+    applyPastedMatrixToDrafts,
+  ]);
+
   const handleSaveEditedRows = useCallback(
     async (colKey: CollectionKey, targetDocIds?: string[]) => {
       const editMap = inlineEdits[colKey] || {};
@@ -2004,6 +2451,8 @@ export const TempTab: React.FC<TempTabProps> = ({
             rowsToSave.map((r) => ({
               doc_id: r.doc_id,
               hybrid_name: r.hybrid_name,
+              sku: r.sku || "",
+              hadSku: Boolean(r._hadSku),
               crop_type: r.crop_type,
             })),
           );
@@ -2012,6 +2461,8 @@ export const TempTab: React.FC<TempTabProps> = ({
             rowsToSave.map((r) => ({
               doc_id: r.doc_id,
               hybrid_id: r.hybrid_id || null,
+              sku: r.sku || "",
+              hadSku: Boolean(r._hadSku),
               shipping_date: r.shipping_date,
               exp_date: r.exp_date,
               initial_dr_kg: Number(r.initial_dr_kg) || 0,
@@ -2025,6 +2476,8 @@ export const TempTab: React.FC<TempTabProps> = ({
               shipping_date: r.shipping_date,
               partner_id: r.partner_id || null,
               lot_no: r.lot_no,
+              sku: r.sku || "",
+              hadSku: Boolean(r._hadSku),
               exp_date: r.exp_date,
               shipped_qty_kg: Number(r.shipped_qty_kg) || 0,
             })),
@@ -2056,6 +2509,8 @@ export const TempTab: React.FC<TempTabProps> = ({
                 doc_id: r.doc_id,
                 partner_id: r.partner_id || null,
                 lot_no: r.lot_no,
+                sku: r.sku || "",
+                hadSku: Boolean(r._hadSku),
                 checker_id: r.checker_id || null,
                 crop_year: r.crop_year || "FY2026",
                 months: parsedMonths,
@@ -2519,6 +2974,16 @@ export const TempTab: React.FC<TempTabProps> = ({
 
           <button
             type="button"
+            onClick={handleQuickPasteFromExcelButton}
+            title="Paste beberapa baris langsung dari Excel ke tabel aktif"
+            className="h-9 px-3 rounded-xl bg-white border border-emerald-300 hover:bg-emerald-50 text-emerald-800 text-xs font-mono font-semibold flex items-center gap-1.5 cursor-pointer shadow-2xs"
+          >
+            <span className="material-symbols-outlined text-[15px] text-emerald-600">content_paste_go</span>
+            Paste Excel
+          </button>
+
+          <button
+            type="button"
             onClick={handleExportFirebaseJson}
             className="h-9 px-3 rounded-xl bg-white border border-[#e0e0fa] hover:bg-[#f4f2ff] text-[#181a2c] text-xs font-mono font-semibold flex items-center gap-1.5 cursor-pointer"
           >
@@ -2614,6 +3079,15 @@ export const TempTab: React.FC<TempTabProps> = ({
                 )}
               </div>
               <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleQuickPasteFromExcelButton}
+                  title="Paste multi-baris dari Excel"
+                  className="h-8 px-2.5 rounded-lg bg-white border border-emerald-300 hover:bg-emerald-100 text-emerald-900 font-mono text-[11px] font-bold cursor-pointer flex items-center gap-1"
+                >
+                  <span className="material-symbols-outlined text-[14px] text-emerald-700">content_paste</span>
+                  Paste Excel
+                </button>
                 <button
                   type="button"
                   onClick={() => handleAddInlineRows(activeCollection, 1)}
@@ -2825,6 +3299,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                       </th>
                       {renderHeaderCell("opname_logs", "partner_id", "partner_id (FK)")}
                       {renderHeaderCell("opname_logs", "lot_no", "lot_no (FK)")}
+                      {renderHeaderCell("opname_logs", "sku", "sku")}
                       {renderHeaderCell("opname_logs", "checker_id", "checker_id (FK)")}
                       {renderHeaderCell("opname_logs", "crop_year", "crop_year")}
                       {FISCAL_MONTH_COLS.map((m) =>
@@ -2836,12 +3311,13 @@ export const TempTab: React.FC<TempTabProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#f1f0fa] text-[#181a2c]">
-                    {inlineDrafts.opname_logs.map((d) => (
+                    {inlineDrafts.opname_logs.map((d, draftIdx) => (
                       <tr key={d._draftId} className="bg-emerald-50/45 border-b border-emerald-200/70">
                         <td className="py-2 px-3 text-[10px] font-bold text-emerald-700">+</td>
                         <td className="py-2 px-2 whitespace-nowrap">
                           <select
                             value={d.partner_id}
+                            onPaste={(e) => handlePasteDraftCells("opname_logs", draftIdx, "partner_id", e, true)}
                             onChange={(e) =>
                               handleUpdateInlineDraft("opname_logs", d._draftId, {
                                 partner_id: e.target.value,
@@ -2862,6 +3338,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                             type="text"
                             list="inline-lots-list"
                             value={d.lot_no}
+                            onPaste={(e) => handlePasteDraftCells("opname_logs", draftIdx, "lot_no", e)}
                             onChange={(e) =>
                               handleUpdateInlineDraft("opname_logs", d._draftId, {
                                 lot_no: e.target.value,
@@ -2872,8 +3349,23 @@ export const TempTab: React.FC<TempTabProps> = ({
                           />
                         </td>
                         <td className="py-2 px-2 whitespace-nowrap">
+                          <input
+                            type="text"
+                            value={d.sku || ""}
+                            onPaste={(e) => handlePasteDraftCells("opname_logs", draftIdx, "sku", e)}
+                            onChange={(e) =>
+                              handleUpdateInlineDraft("opname_logs", d._draftId, {
+                                sku: e.target.value.toUpperCase(),
+                              })
+                            }
+                            placeholder="SKU"
+                            className="h-8 w-28 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-bold uppercase outline-none"
+                          />
+                        </td>
+                        <td className="py-2 px-2 whitespace-nowrap">
                           <select
                             value={d.checker_id}
+                            onPaste={(e) => handlePasteDraftCells("opname_logs", draftIdx, "checker_id", e, true)}
                             onChange={(e) =>
                               handleUpdateInlineDraft("opname_logs", d._draftId, {
                                 checker_id: e.target.value,
@@ -2893,6 +3385,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                           <input
                             type="text"
                             value={d.crop_year}
+                            onPaste={(e) => handlePasteDraftCells("opname_logs", draftIdx, "crop_year", e)}
                             onChange={(e) =>
                               handleUpdateInlineDraft("opname_logs", d._draftId, {
                                 crop_year: e.target.value,
@@ -2914,6 +3407,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                                   placeholder="in"
                                   title={`${key.toUpperCase()} IN (Kg)`}
                                   value={cell.in}
+                                  onPaste={(e) => handlePasteDraftCells("opname_logs", draftIdx, `${key}.in`, e)}
                                   onChange={(e) =>
                                     handleUpdateOpnameMonthCell(d._draftId, key, "in", e.target.value)
                                   }
@@ -2926,6 +3420,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                                   placeholder="idl"
                                   title={`${key.toUpperCase()} IDLE (Kg)`}
                                   value={cell.idle}
+                                  onPaste={(e) => handlePasteDraftCells("opname_logs", draftIdx, `${key}.idle`, e)}
                                   onChange={(e) =>
                                     handleUpdateOpnameMonthCell(d._draftId, key, "idle", e.target.value)
                                   }
@@ -2938,6 +3433,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                                   placeholder="pog"
                                   title={`${key.toUpperCase()} POG (Kg)`}
                                   value={cell.pog}
+                                  onPaste={(e) => handlePasteDraftCells("opname_logs", draftIdx, `${key}.pog`, e)}
                                   onChange={(e) =>
                                     handleUpdateOpnameMonthCell(d._draftId, key, "pog", e.target.value)
                                   }
@@ -2969,7 +3465,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                         </td>
                       </tr>
                     ))}
-                    {filteredLogs.map((l) => {
+                    {filteredLogs.map((l, rowIdx) => {
                       const rowId = l.doc_id || l._key;
                       const editRow = inlineEdits.opname_logs[rowId];
                       const isChecked = selectedRowIds.opname_logs.includes(rowId);
@@ -2988,6 +3484,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                             <td className="py-2 px-2 whitespace-nowrap">
                               <select
                                 value={editRow.partner_id}
+                                onPaste={(e) =>
+                                  handlePasteEditCells("opname_logs", filteredLogs, rowIdx, "partner_id", e, true)
+                                }
                                 onChange={(e) =>
                                   handleUpdateEditField("opname_logs", rowId, {
                                     partner_id: e.target.value,
@@ -3008,6 +3507,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                                 type="text"
                                 list="inline-lots-list"
                                 value={editRow.lot_no}
+                                onPaste={(e) =>
+                                  handlePasteEditCells("opname_logs", filteredLogs, rowIdx, "lot_no", e)
+                                }
                                 onChange={(e) =>
                                   handleUpdateEditField("opname_logs", rowId, {
                                     lot_no: e.target.value.toUpperCase(),
@@ -3017,8 +3519,27 @@ export const TempTab: React.FC<TempTabProps> = ({
                               />
                             </td>
                             <td className="py-2 px-2 whitespace-nowrap">
+                              <input
+                                type="text"
+                                value={editRow.sku || ""}
+                                onPaste={(e) =>
+                                  handlePasteEditCells("opname_logs", filteredLogs, rowIdx, "sku", e)
+                                }
+                                onChange={(e) =>
+                                  handleUpdateEditField("opname_logs", rowId, {
+                                    sku: e.target.value.toUpperCase(),
+                                  })
+                                }
+                                placeholder="SKU"
+                                className="h-8 w-28 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-bold uppercase outline-none"
+                              />
+                            </td>
+                            <td className="py-2 px-2 whitespace-nowrap">
                               <select
                                 value={editRow.checker_id}
+                                onPaste={(e) =>
+                                  handlePasteEditCells("opname_logs", filteredLogs, rowIdx, "checker_id", e, true)
+                                }
                                 onChange={(e) =>
                                   handleUpdateEditField("opname_logs", rowId, {
                                     checker_id: e.target.value,
@@ -3038,6 +3559,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                               <input
                                 type="text"
                                 value={editRow.crop_year}
+                                onPaste={(e) =>
+                                  handlePasteEditCells("opname_logs", filteredLogs, rowIdx, "crop_year", e)
+                                }
                                 onChange={(e) =>
                                   handleUpdateEditField("opname_logs", rowId, {
                                     crop_year: e.target.value,
@@ -3057,6 +3581,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                                       step="0.01"
                                       placeholder="in"
                                       value={cell.in}
+                                      onPaste={(e) =>
+                                        handlePasteEditCells("opname_logs", filteredLogs, rowIdx, `${key}.in`, e)
+                                      }
                                       onChange={(e) =>
                                         handleUpdateEditOpnameMonthCell(rowId, key, "in", e.target.value)
                                       }
@@ -3068,6 +3595,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                                       step="0.01"
                                       placeholder="idl"
                                       value={cell.idle}
+                                      onPaste={(e) =>
+                                        handlePasteEditCells("opname_logs", filteredLogs, rowIdx, `${key}.idle`, e)
+                                      }
                                       onChange={(e) =>
                                         handleUpdateEditOpnameMonthCell(rowId, key, "idle", e.target.value)
                                       }
@@ -3079,6 +3609,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                                       step="0.01"
                                       placeholder="pog"
                                       value={cell.pog}
+                                      onPaste={(e) =>
+                                        handlePasteEditCells("opname_logs", filteredLogs, rowIdx, `${key}.pog`, e)
+                                      }
                                       onChange={(e) =>
                                         handleUpdateEditOpnameMonthCell(rowId, key, "pog", e.target.value)
                                       }
@@ -3126,6 +3659,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                           </td>
                           <td className="py-2.5 px-3 whitespace-nowrap">
                             {renderFkBadge(l.lot_no, "lots")}
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold text-[#181a2c] whitespace-nowrap">
+                            {l.sku || "-"}
                           </td>
                           <td className="py-2.5 px-3 whitespace-nowrap">
                             {renderFkBadge(l.checker_id, "employees")}
@@ -3292,6 +3828,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                       {renderHeaderCell("dr_shipments", "shipping_date", "shipping_date")}
                       {renderHeaderCell("dr_shipments", "partner_id", "partner_id (FK)")}
                       {renderHeaderCell("dr_shipments", "lot_no", "lot_no (FK)")}
+                      {renderHeaderCell("dr_shipments", "sku", "sku")}
                       {renderHeaderCell("dr_shipments", "exp_date", "exp_date")}
                       {renderHeaderCell("dr_shipments", "shipped_qty_kg", "shipped_qty_kg", "right")}
                       <th className="py-2 px-4 text-right align-top font-bold text-[11px] text-[#434655]">
@@ -3300,7 +3837,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#f1f0fa] text-[#181a2c]">
-                    {inlineDrafts.dr_shipments.map((d) => (
+                    {inlineDrafts.dr_shipments.map((d, draftIdx) => (
                       <tr key={d._draftId} className="bg-emerald-50/45 border-b border-emerald-200/70">
                         <td className="py-2 px-3 text-[10px] font-bold text-emerald-700">+</td>
                         <td className="py-2 px-4 text-[11px] text-emerald-700 font-semibold italic">
@@ -3310,6 +3847,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                           <input
                             type="date"
                             value={d.shipping_date}
+                            onPaste={(e) => handlePasteDraftCells("dr_shipments", draftIdx, "shipping_date", e)}
                             onChange={(e) =>
                               handleUpdateInlineDraft("dr_shipments", d._draftId, {
                                 shipping_date: e.target.value,
@@ -3321,6 +3859,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                         <td className="py-2 px-3">
                           <select
                             value={d.partner_id}
+                            onPaste={(e) => handlePasteDraftCells("dr_shipments", draftIdx, "partner_id", e, true)}
                             onChange={(e) =>
                               handleUpdateInlineDraft("dr_shipments", d._draftId, {
                                 partner_id: e.target.value,
@@ -3341,6 +3880,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                             type="text"
                             list="inline-lots-list"
                             value={d.lot_no}
+                            onPaste={(e) => handlePasteDraftCells("dr_shipments", draftIdx, "lot_no", e)}
                             onChange={(e) =>
                               handleUpdateInlineDraft("dr_shipments", d._draftId, {
                                 lot_no: e.target.value,
@@ -3353,7 +3893,22 @@ export const TempTab: React.FC<TempTabProps> = ({
                         <td className="py-2 px-3">
                           <input
                             type="text"
+                            value={d.sku || ""}
+                            onPaste={(e) => handlePasteDraftCells("dr_shipments", draftIdx, "sku", e)}
+                            onChange={(e) =>
+                              handleUpdateInlineDraft("dr_shipments", d._draftId, {
+                                sku: e.target.value.toUpperCase(),
+                              })
+                            }
+                            placeholder="SKU"
+                            className="h-8 w-28 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-bold uppercase outline-none"
+                          />
+                        </td>
+                        <td className="py-2 px-3">
+                          <input
+                            type="text"
                             value={d.exp_date}
+                            onPaste={(e) => handlePasteDraftCells("dr_shipments", draftIdx, "exp_date", e)}
                             onChange={(e) =>
                               handleUpdateInlineDraft("dr_shipments", d._draftId, {
                                 exp_date: e.target.value,
@@ -3369,6 +3924,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                             min="0"
                             step="0.01"
                             value={d.shipped_qty_kg}
+                            onPaste={(e) => handlePasteDraftCells("dr_shipments", draftIdx, "shipped_qty_kg", e)}
                             onChange={(e) =>
                               handleUpdateInlineDraft("dr_shipments", d._draftId, {
                                 shipped_qty_kg: e.target.value,
@@ -3397,7 +3953,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                         </td>
                       </tr>
                     ))}
-                    {filteredDr.map((d) => {
+                    {filteredDr.map((d, rowIdx) => {
                       const editRow = inlineEdits.dr_shipments[d.doc_id];
                       const isChecked = selectedRowIds.dr_shipments.includes(d.doc_id);
                       if (editRow) {
@@ -3416,6 +3972,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                               <input
                                 type="date"
                                 value={editRow.shipping_date}
+                                onPaste={(e) =>
+                                  handlePasteEditCells("dr_shipments", filteredDr, rowIdx, "shipping_date", e)
+                                }
                                 onChange={(e) =>
                                   handleUpdateEditField("dr_shipments", d.doc_id, {
                                     shipping_date: e.target.value,
@@ -3427,6 +3986,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                             <td className="py-2 px-3">
                               <select
                                 value={editRow.partner_id}
+                                onPaste={(e) =>
+                                  handlePasteEditCells("dr_shipments", filteredDr, rowIdx, "partner_id", e, true)
+                                }
                                 onChange={(e) =>
                                   handleUpdateEditField("dr_shipments", d.doc_id, {
                                     partner_id: e.target.value,
@@ -3447,6 +4009,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                                 type="text"
                                 list="inline-lots-list"
                                 value={editRow.lot_no}
+                                onPaste={(e) =>
+                                  handlePasteEditCells("dr_shipments", filteredDr, rowIdx, "lot_no", e)
+                                }
                                 onChange={(e) =>
                                   handleUpdateEditField("dr_shipments", d.doc_id, {
                                     lot_no: e.target.value,
@@ -3458,7 +4023,26 @@ export const TempTab: React.FC<TempTabProps> = ({
                             <td className="py-2 px-3">
                               <input
                                 type="text"
+                                value={editRow.sku || ""}
+                                onPaste={(e) =>
+                                  handlePasteEditCells("dr_shipments", filteredDr, rowIdx, "sku", e)
+                                }
+                                onChange={(e) =>
+                                  handleUpdateEditField("dr_shipments", d.doc_id, {
+                                    sku: e.target.value.toUpperCase(),
+                                  })
+                                }
+                                placeholder="SKU"
+                                className="h-8 w-28 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-bold uppercase outline-none"
+                              />
+                            </td>
+                            <td className="py-2 px-3">
+                              <input
+                                type="text"
                                 value={editRow.exp_date}
+                                onPaste={(e) =>
+                                  handlePasteEditCells("dr_shipments", filteredDr, rowIdx, "exp_date", e)
+                                }
                                 onChange={(e) =>
                                   handleUpdateEditField("dr_shipments", d.doc_id, {
                                     exp_date: e.target.value,
@@ -3473,6 +4057,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                                 min="0"
                                 step="0.01"
                                 value={editRow.shipped_qty_kg}
+                                onPaste={(e) =>
+                                  handlePasteEditCells("dr_shipments", filteredDr, rowIdx, "shipped_qty_kg", e)
+                                }
                                 onChange={(e) =>
                                   handleUpdateEditField("dr_shipments", d.doc_id, {
                                     shipped_qty_kg: e.target.value,
@@ -3517,6 +4104,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                           <td className="py-2.5 px-4 text-[#434655]">{d.shipping_date}</td>
                           <td className="py-2.5 px-4">{renderFkBadge(d.partner_id, "partners")}</td>
                           <td className="py-2.5 px-4">{renderFkBadge(d.lot_no, "lots")}</td>
+                          <td className="py-2.5 px-4 font-semibold text-[#181a2c]">{d.sku || "-"}</td>
                           <td className="py-2.5 px-4 text-[#434655]">{d.exp_date || "null"}</td>
                           <td className="py-2.5 px-4 text-right tabular-nums font-bold">
                             {d.shipped_qty_kg}
@@ -3572,6 +4160,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                     </th>
                     {renderHeaderCell("lots", "doc_id", "doc_id / lot_no (PK)")}
                     {renderHeaderCell("lots", "hybrid_id", "hybrid_id (FK)")}
+                    {renderHeaderCell("lots", "sku", "sku")}
                     {renderHeaderCell("lots", "shipping_date", "shipping_date")}
                     {renderHeaderCell("lots", "exp_date", "exp_date")}
                     {renderHeaderCell("lots", "initial_dr_kg", "initial_dr_kg", "right")}
@@ -3581,13 +4170,14 @@ export const TempTab: React.FC<TempTabProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#f1f0fa] text-[#181a2c]">
-                  {inlineDrafts.lots.map((d) => (
+                  {inlineDrafts.lots.map((d, draftIdx) => (
                     <tr key={d._draftId} className="bg-emerald-50/45 border-b border-emerald-200/70">
                       <td className="py-2 px-3 text-[10px] font-bold text-emerald-700">+</td>
                       <td className="py-2 px-3">
                         <input
                           type="text"
                           value={d.lot_no}
+                          onPaste={(e) => handlePasteDraftCells("lots", draftIdx, "lot_no", e)}
                           onChange={(e) =>
                             handleUpdateInlineDraft("lots", d._draftId, {
                               lot_no: e.target.value,
@@ -3600,6 +4190,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                       <td className="py-2 px-3">
                         <select
                           value={d.hybrid_id}
+                          onPaste={(e) => handlePasteDraftCells("lots", draftIdx, "hybrid_id", e, true)}
                           onChange={(e) =>
                             handleUpdateInlineDraft("lots", d._draftId, {
                               hybrid_id: e.target.value,
@@ -3617,8 +4208,23 @@ export const TempTab: React.FC<TempTabProps> = ({
                       </td>
                       <td className="py-2 px-3">
                         <input
+                          type="text"
+                          value={d.sku || ""}
+                          onPaste={(e) => handlePasteDraftCells("lots", draftIdx, "sku", e)}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("lots", d._draftId, {
+                              sku: e.target.value.toUpperCase(),
+                            })
+                          }
+                          placeholder="SKU"
+                          className="h-8 w-28 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-bold uppercase outline-none"
+                        />
+                      </td>
+                      <td className="py-2 px-3">
+                        <input
                           type="date"
                           value={d.shipping_date}
+                          onPaste={(e) => handlePasteDraftCells("lots", draftIdx, "shipping_date", e)}
                           onChange={(e) =>
                             handleUpdateInlineDraft("lots", d._draftId, {
                               shipping_date: e.target.value,
@@ -3631,6 +4237,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                         <input
                           type="text"
                           value={d.exp_date}
+                          onPaste={(e) => handlePasteDraftCells("lots", draftIdx, "exp_date", e)}
                           onChange={(e) =>
                             handleUpdateInlineDraft("lots", d._draftId, {
                               exp_date: e.target.value,
@@ -3646,6 +4253,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                           min="0"
                           step="0.01"
                           value={d.initial_dr_kg}
+                          onPaste={(e) => handlePasteDraftCells("lots", draftIdx, "initial_dr_kg", e)}
                           onChange={(e) =>
                             handleUpdateInlineDraft("lots", d._draftId, {
                               initial_dr_kg: e.target.value,
@@ -3674,7 +4282,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                       </td>
                     </tr>
                   ))}
-                  {filteredLots.map((l) => {
+                  {filteredLots.map((l, rowIdx) => {
                     const editRow = inlineEdits.lots[l.doc_id];
                     const isChecked = selectedRowIds.lots.includes(l.doc_id);
                     if (editRow) {
@@ -3692,6 +4300,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                           <td className="py-2 px-3">
                             <select
                               value={editRow.hybrid_id}
+                              onPaste={(e) =>
+                                handlePasteEditCells("lots", filteredLots, rowIdx, "hybrid_id", e, true)
+                              }
                               onChange={(e) =>
                                 handleUpdateEditField("lots", l.doc_id, {
                                   hybrid_id: e.target.value,
@@ -3709,8 +4320,27 @@ export const TempTab: React.FC<TempTabProps> = ({
                           </td>
                           <td className="py-2 px-3">
                             <input
+                              type="text"
+                              value={editRow.sku || ""}
+                              onPaste={(e) =>
+                                handlePasteEditCells("lots", filteredLots, rowIdx, "sku", e)
+                              }
+                              onChange={(e) =>
+                                handleUpdateEditField("lots", l.doc_id, {
+                                  sku: e.target.value.toUpperCase(),
+                                })
+                              }
+                              placeholder="SKU"
+                              className="h-8 w-28 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-bold uppercase outline-none"
+                            />
+                          </td>
+                          <td className="py-2 px-3">
+                            <input
                               type="date"
                               value={editRow.shipping_date}
+                              onPaste={(e) =>
+                                handlePasteEditCells("lots", filteredLots, rowIdx, "shipping_date", e)
+                              }
                               onChange={(e) =>
                                 handleUpdateEditField("lots", l.doc_id, {
                                   shipping_date: e.target.value,
@@ -3723,6 +4353,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                             <input
                               type="text"
                               value={editRow.exp_date}
+                              onPaste={(e) =>
+                                handlePasteEditCells("lots", filteredLots, rowIdx, "exp_date", e)
+                              }
                               onChange={(e) =>
                                 handleUpdateEditField("lots", l.doc_id, {
                                   exp_date: e.target.value,
@@ -3738,6 +4371,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                               min="0"
                               step="0.01"
                               value={editRow.initial_dr_kg}
+                              onPaste={(e) =>
+                                handlePasteEditCells("lots", filteredLots, rowIdx, "initial_dr_kg", e)
+                              }
                               onChange={(e) =>
                                 handleUpdateEditField("lots", l.doc_id, {
                                   initial_dr_kg: e.target.value,
@@ -3780,6 +4416,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                         </td>
                         <td className="py-2.5 px-4 font-bold">{l.doc_id}</td>
                         <td className="py-2.5 px-4">{renderFkBadge(l.hybrid_id, "hybrids")}</td>
+                        <td className="py-2.5 px-4 font-semibold text-[#181a2c]">{l.sku || "-"}</td>
                         <td className="py-2.5 px-4 text-[#434655]">{l.shipping_date || "null"}</td>
                         <td className="py-2.5 px-4 text-[#434655]">{l.exp_date || "null"}</td>
                         <td className="py-2.5 px-4 text-right tabular-nums font-bold">
@@ -3833,6 +4470,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                     </th>
                     {renderHeaderCell("hybrids", "doc_id", "doc_id (PK)")}
                     {renderHeaderCell("hybrids", "hybrid_name", "hybrid_name")}
+                    {renderHeaderCell("hybrids", "sku", "sku")}
                     {renderHeaderCell("hybrids", "crop_type", "crop_type")}
                     <th className="py-2 px-4 text-right align-top font-bold text-[11px] text-[#434655]">
                       actions
@@ -3840,7 +4478,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#f1f0fa] text-[#181a2c]">
-                  {inlineDrafts.hybrids.map((d) => (
+                  {inlineDrafts.hybrids.map((d, draftIdx) => (
                     <tr key={d._draftId} className="bg-emerald-50/45 border-b border-emerald-200/70">
                       <td className="py-2 px-3 text-[10px] font-bold text-emerald-700">+</td>
                       <td className="py-2 px-4 text-[11px] text-emerald-700 font-semibold italic">
@@ -3850,6 +4488,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                         <input
                           type="text"
                           value={d.hybrid_name}
+                          onPaste={(e) => handlePasteDraftCells("hybrids", draftIdx, "hybrid_name", e)}
                           onChange={(e) =>
                             handleUpdateInlineDraft("hybrids", d._draftId, {
                               hybrid_name: e.target.value.toUpperCase(),
@@ -3860,8 +4499,23 @@ export const TempTab: React.FC<TempTabProps> = ({
                         />
                       </td>
                       <td className="py-2 px-3">
+                        <input
+                          type="text"
+                          value={d.sku || ""}
+                          onPaste={(e) => handlePasteDraftCells("hybrids", draftIdx, "sku", e)}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("hybrids", d._draftId, {
+                              sku: e.target.value.toUpperCase(),
+                            })
+                          }
+                          placeholder="SKU (mis. SKU-ADV777)"
+                          className="h-8 w-40 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-bold uppercase outline-none"
+                        />
+                      </td>
+                      <td className="py-2 px-3">
                         <select
                           value={d.crop_type}
+                          onPaste={(e) => handlePasteDraftCells("hybrids", draftIdx, "crop_type", e, true)}
                           onChange={(e) =>
                             handleUpdateInlineDraft("hybrids", d._draftId, {
                               crop_type: e.target.value,
@@ -3893,7 +4547,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                       </td>
                     </tr>
                   ))}
-                  {filteredHybrids.map((h) => {
+                  {filteredHybrids.map((h, rowIdx) => {
                     const editRow = inlineEdits.hybrids[h.doc_id];
                     const isChecked = selectedRowIds.hybrids.includes(h.doc_id);
                     if (editRow) {
@@ -3912,6 +4566,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                             <input
                               type="text"
                               value={editRow.hybrid_name}
+                              onPaste={(e) =>
+                                handlePasteEditCells("hybrids", filteredHybrids, rowIdx, "hybrid_name", e)
+                              }
                               onChange={(e) =>
                                 handleUpdateEditField("hybrids", h.doc_id, {
                                   hybrid_name: e.target.value.toUpperCase(),
@@ -3921,8 +4578,27 @@ export const TempTab: React.FC<TempTabProps> = ({
                             />
                           </td>
                           <td className="py-2 px-3">
+                            <input
+                              type="text"
+                              value={editRow.sku || ""}
+                              onPaste={(e) =>
+                                handlePasteEditCells("hybrids", filteredHybrids, rowIdx, "sku", e)
+                              }
+                              onChange={(e) =>
+                                handleUpdateEditField("hybrids", h.doc_id, {
+                                  sku: e.target.value.toUpperCase(),
+                                })
+                              }
+                              placeholder="SKU"
+                              className="h-8 w-40 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-bold uppercase outline-none"
+                            />
+                          </td>
+                          <td className="py-2 px-3">
                             <select
                               value={editRow.crop_type}
+                              onPaste={(e) =>
+                                handlePasteEditCells("hybrids", filteredHybrids, rowIdx, "crop_type", e, true)
+                              }
                               onChange={(e) =>
                                 handleUpdateEditField("hybrids", h.doc_id, {
                                   crop_type: e.target.value,
@@ -3970,6 +4646,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                         <td className="py-2.5 px-4 font-sans font-semibold text-primary">
                           {h.hybrid_name}
                         </td>
+                        <td className="py-2.5 px-4 font-semibold text-[#181a2c]">{h.sku || "-"}</td>
                         <td className="py-2.5 px-4 font-sans text-[#434655]">{h.crop_type}</td>
                         <td className="py-2.5 px-4 text-right whitespace-nowrap font-sans">
                           <div className="inline-flex items-center gap-1.5">
@@ -4032,7 +4709,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#f1f0fa] text-[#181a2c]">
-                  {inlineDrafts.partners.map((d) => (
+                  {inlineDrafts.partners.map((d, draftIdx) => (
                     <tr key={d._draftId} className="bg-emerald-50/45 border-b border-emerald-200/70">
                       <td className="py-2 px-3 text-[10px] font-bold text-emerald-700">+</td>
                       <td className="py-2 px-4 text-[11px] text-emerald-700 font-semibold italic">
@@ -4042,6 +4719,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                         <input
                           type="text"
                           value={d.partner_name}
+                          onPaste={(e) => handlePasteDraftCells("partners", draftIdx, "partner_name", e)}
                           onChange={(e) =>
                             handleUpdateInlineDraft("partners", d._draftId, {
                               partner_name: e.target.value,
@@ -4054,6 +4732,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                       <td className="py-2 px-3">
                         <select
                           value={d.category}
+                          onPaste={(e) => handlePasteDraftCells("partners", draftIdx, "category", e, true)}
                           onChange={(e) =>
                             handleUpdateInlineDraft("partners", d._draftId, {
                               category: e.target.value,
@@ -4071,6 +4750,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                       <td className="py-2 px-3">
                         <select
                           value={d.pic_employee_id}
+                          onPaste={(e) => handlePasteDraftCells("partners", draftIdx, "pic_employee_id", e, true)}
                           onChange={(e) =>
                             handleUpdateInlineDraft("partners", d._draftId, {
                               pic_employee_id: e.target.value,
@@ -4089,6 +4769,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                       <td className="py-2 px-3">
                         <select
                           value={d.division_group}
+                          onPaste={(e) => handlePasteDraftCells("partners", draftIdx, "division_group", e, true)}
                           onChange={(e) =>
                             handleUpdateInlineDraft("partners", d._draftId, {
                               division_group: e.target.value,
@@ -4105,6 +4786,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                           type="text"
                           list="inline-prov-list"
                           value={d.province}
+                          onPaste={(e) => handlePasteDraftCells("partners", draftIdx, "province", e)}
                           onChange={(e) =>
                             handleUpdateInlineDraft("partners", d._draftId, {
                               province: e.target.value,
@@ -4118,6 +4800,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                         <input
                           type="text"
                           value={d.area}
+                          onPaste={(e) => handlePasteDraftCells("partners", draftIdx, "area", e)}
                           onChange={(e) =>
                             handleUpdateInlineDraft("partners", d._draftId, {
                               area: e.target.value,
@@ -4147,7 +4830,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                       </td>
                     </tr>
                   ))}
-                  {filteredPartners.map((p) => {
+                  {filteredPartners.map((p, rowIdx) => {
                     const editRow = inlineEdits.partners[p.doc_id];
                     const isChecked = selectedRowIds.partners.includes(p.doc_id);
                     if (editRow) {
@@ -4166,6 +4849,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                             <input
                               type="text"
                               value={editRow.partner_name}
+                              onPaste={(e) =>
+                                handlePasteEditCells("partners", filteredPartners, rowIdx, "partner_name", e)
+                              }
                               onChange={(e) =>
                                 handleUpdateEditField("partners", p.doc_id, {
                                   partner_name: e.target.value,
@@ -4177,6 +4863,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                           <td className="py-2 px-3">
                             <select
                               value={editRow.category}
+                              onPaste={(e) =>
+                                handlePasteEditCells("partners", filteredPartners, rowIdx, "category", e, true)
+                              }
                               onChange={(e) =>
                                 handleUpdateEditField("partners", p.doc_id, {
                                   category: e.target.value,
@@ -4194,6 +4883,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                           <td className="py-2 px-3">
                             <select
                               value={editRow.pic_employee_id}
+                              onPaste={(e) =>
+                                handlePasteEditCells("partners", filteredPartners, rowIdx, "pic_employee_id", e, true)
+                              }
                               onChange={(e) =>
                                 handleUpdateEditField("partners", p.doc_id, {
                                   pic_employee_id: e.target.value,
@@ -4212,6 +4904,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                           <td className="py-2 px-3">
                             <select
                               value={editRow.division_group}
+                              onPaste={(e) =>
+                                handlePasteEditCells("partners", filteredPartners, rowIdx, "division_group", e, true)
+                              }
                               onChange={(e) =>
                                 handleUpdateEditField("partners", p.doc_id, {
                                   division_group: e.target.value,
@@ -4228,6 +4923,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                               type="text"
                               list="inline-prov-list"
                               value={editRow.province}
+                              onPaste={(e) =>
+                                handlePasteEditCells("partners", filteredPartners, rowIdx, "province", e)
+                              }
                               onChange={(e) =>
                                 handleUpdateEditField("partners", p.doc_id, {
                                   province: e.target.value,
@@ -4240,6 +4938,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                             <input
                               type="text"
                               value={editRow.area}
+                              onPaste={(e) =>
+                                handlePasteEditCells("partners", filteredPartners, rowIdx, "area", e)
+                              }
                               onChange={(e) =>
                                 handleUpdateEditField("partners", p.doc_id, {
                                   area: e.target.value,
@@ -4354,7 +5055,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#f1f0fa] text-[#181a2c]">
-                  {inlineDrafts.employees.map((d) => (
+                  {inlineDrafts.employees.map((d, draftIdx) => (
                     <tr key={d._draftId} className="bg-emerald-50/45 border-b border-emerald-200/70">
                       <td className="py-2 px-3 text-[10px] font-bold text-emerald-700">+</td>
                       <td className="py-2 px-4 text-[11px] text-emerald-700 font-semibold italic">
@@ -4364,6 +5065,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                         <input
                           type="text"
                           value={d.username}
+                          onPaste={(e) => handlePasteDraftCells("employees", draftIdx, "username", e)}
                           onChange={(e) =>
                             handleUpdateInlineDraft("employees", d._draftId, {
                               username: e.target.value.toLowerCase(),
@@ -4377,6 +5079,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                         <input
                           type="text"
                           value={d.password}
+                          onPaste={(e) => handlePasteDraftCells("employees", draftIdx, "password", e)}
                           onChange={(e) =>
                             handleUpdateInlineDraft("employees", d._draftId, {
                               password: e.target.value,
@@ -4390,6 +5093,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                         <input
                           type="text"
                           value={d.full_name}
+                          onPaste={(e) => handlePasteDraftCells("employees", draftIdx, "full_name", e)}
                           onChange={(e) =>
                             handleUpdateInlineDraft("employees", d._draftId, {
                               full_name: e.target.value,
@@ -4402,6 +5106,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                       <td className="py-2 px-2">
                         <select
                           value={d.position}
+                          onPaste={(e) => handlePasteDraftCells("employees", draftIdx, "position", e, true)}
                           onChange={(e) =>
                             handleUpdateInlineDraft("employees", d._draftId, {
                               position: e.target.value,
@@ -4423,6 +5128,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                       <td className="py-2 px-2">
                         <select
                           value={d.upline_id}
+                          onPaste={(e) => handlePasteDraftCells("employees", draftIdx, "upline_id", e, true)}
                           onChange={(e) =>
                             handleUpdateInlineDraft("employees", d._draftId, {
                               upline_id: e.target.value,
@@ -4442,6 +5148,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                       <td className="py-2 px-2">
                         <select
                           value={d.division_group}
+                          onPaste={(e) => handlePasteDraftCells("employees", draftIdx, "division_group", e, true)}
                           onChange={(e) =>
                             handleUpdateInlineDraft("employees", d._draftId, {
                               division_group: e.target.value,
@@ -4459,6 +5166,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                           type="text"
                           list="inline-prov-list"
                           value={d.province}
+                          onPaste={(e) => handlePasteDraftCells("employees", draftIdx, "province", e)}
                           onChange={(e) =>
                             handleUpdateInlineDraft("employees", d._draftId, {
                               province: e.target.value,
@@ -4472,6 +5180,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                         <input
                           type="text"
                           value={d.area}
+                          onPaste={(e) => handlePasteDraftCells("employees", draftIdx, "area", e)}
                           onChange={(e) =>
                             handleUpdateInlineDraft("employees", d._draftId, {
                               area: e.target.value,
@@ -4501,7 +5210,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                       </td>
                     </tr>
                   ))}
-                  {filteredEmployees.map((e) => {
+                  {filteredEmployees.map((e, rowIdx) => {
                     const editRow = inlineEdits.employees[e.doc_id];
                     const isChecked = selectedRowIds.employees.includes(e.doc_id);
                     if (editRow) {
@@ -4520,6 +5229,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                             <input
                               type="text"
                               value={editRow.username}
+                              onPaste={(ev) =>
+                                handlePasteEditCells("employees", filteredEmployees, rowIdx, "username", ev)
+                              }
                               onChange={(ev) =>
                                 handleUpdateEditField("employees", e.doc_id, {
                                   username: ev.target.value.toLowerCase(),
@@ -4532,6 +5244,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                             <input
                               type="text"
                               value={editRow.password}
+                              onPaste={(ev) =>
+                                handlePasteEditCells("employees", filteredEmployees, rowIdx, "password", ev)
+                              }
                               onChange={(ev) =>
                                 handleUpdateEditField("employees", e.doc_id, {
                                   password: ev.target.value,
@@ -4544,6 +5259,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                             <input
                               type="text"
                               value={editRow.full_name}
+                              onPaste={(ev) =>
+                                handlePasteEditCells("employees", filteredEmployees, rowIdx, "full_name", ev)
+                              }
                               onChange={(ev) =>
                                 handleUpdateEditField("employees", e.doc_id, {
                                   full_name: ev.target.value,
@@ -4555,6 +5273,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                           <td className="py-2 px-2">
                             <select
                               value={editRow.position}
+                              onPaste={(ev) =>
+                                handlePasteEditCells("employees", filteredEmployees, rowIdx, "position", ev, true)
+                              }
                               onChange={(ev) =>
                                 handleUpdateEditField("employees", e.doc_id, {
                                   position: ev.target.value,
@@ -4576,6 +5297,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                           <td className="py-2 px-2">
                             <select
                               value={editRow.upline_id}
+                              onPaste={(ev) =>
+                                handlePasteEditCells("employees", filteredEmployees, rowIdx, "upline_id", ev, true)
+                              }
                               onChange={(ev) =>
                                 handleUpdateEditField("employees", e.doc_id, {
                                   upline_id: ev.target.value,
@@ -4596,6 +5320,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                           <td className="py-2 px-2">
                             <select
                               value={editRow.status}
+                              onPaste={(ev) =>
+                                handlePasteEditCells("employees", filteredEmployees, rowIdx, "status", ev, true)
+                              }
                               onChange={(ev) =>
                                 handleUpdateEditField("employees", e.doc_id, {
                                   status: ev.target.value,
@@ -4610,6 +5337,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                           <td className="py-2 px-2">
                             <select
                               value={editRow.division_group}
+                              onPaste={(ev) =>
+                                handlePasteEditCells("employees", filteredEmployees, rowIdx, "division_group", ev, true)
+                              }
                               onChange={(ev) =>
                                 handleUpdateEditField("employees", e.doc_id, {
                                   division_group: ev.target.value,
@@ -4627,6 +5357,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                               type="text"
                               list="inline-prov-list"
                               value={editRow.province}
+                              onPaste={(ev) =>
+                                handlePasteEditCells("employees", filteredEmployees, rowIdx, "province", ev)
+                              }
                               onChange={(ev) =>
                                 handleUpdateEditField("employees", e.doc_id, {
                                   province: ev.target.value,
@@ -4639,6 +5372,9 @@ export const TempTab: React.FC<TempTabProps> = ({
                             <input
                               type="text"
                               value={editRow.area}
+                              onPaste={(ev) =>
+                                handlePasteEditCells("employees", filteredEmployees, rowIdx, "area", ev)
+                              }
                               onChange={(ev) =>
                                 handleUpdateEditField("employees", e.doc_id, {
                                   area: ev.target.value,
@@ -4847,6 +5583,71 @@ export const TempTab: React.FC<TempTabProps> = ({
                 >
                   <span className="material-symbols-outlined text-[15px]">delete</span>
                   {isDeletingRows ? "Menghapus..." : `Ya, Hapus (${deleteConfirm.docIds.length})`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pasteModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#181a2c]/45 backdrop-blur-xs p-4">
+          <div className="w-full max-w-xl rounded-2xl bg-white border border-[#e0e0fa] shadow-2xl overflow-hidden">
+            <div className="px-5 py-4 bg-emerald-50/90 border-b border-emerald-200 flex items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2.5">
+                <span className="material-symbols-outlined text-emerald-700 text-[20px]">
+                  content_paste_go
+                </span>
+                <div>
+                  <h3 className="text-sm font-bold text-[#181a2c]">
+                    Paste Data Multi-Baris dari Excel ({activeCollection})
+                  </h3>
+                  <p className="text-[11px] text-emerald-800">
+                    Copy beberapa baris/kolom dari Excel lalu tekan <strong>Ctrl+V</strong> /{" "}
+                    <strong>Cmd+V</strong> di bawah ini (atau langsung paste di kolom input tabel).
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPasteModalOpen(false)}
+                className="text-[#747687] hover:text-[#181a2c] text-sm font-bold cursor-pointer px-2 py-1"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-5 space-y-3">
+              <div className="rounded-xl bg-[#f9f8ff] border border-[#e0e0fa] px-3 py-2 text-[11px] font-mono text-[#434655]">
+                <span className="font-bold text-[#181a2c]">Urutan Kolom ({activeCollection}): </span>
+                {getOrderedEditableFields(activeCollection, "draft").slice(0, 8).join(" → ")}
+                {getOrderedEditableFields(activeCollection, "draft").length > 8 ? " → ..." : ""}
+              </div>
+              <textarea
+                rows={7}
+                value={pasteModalText}
+                onChange={(e) => setPasteModalText(e.target.value)}
+                placeholder="Paste (Ctrl+V) baris-baris dari Excel di sini..."
+                className="w-full rounded-xl border border-[#e0e0fa] focus:border-primary p-3 font-mono text-xs text-[#181a2c] outline-none"
+                autoFocus
+              />
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPasteModalOpen(false);
+                    setPasteModalText("");
+                  }}
+                  className="h-9 px-4 rounded-xl bg-white border border-[#e0e0fa] hover:bg-[#f4f2ff] text-[#434655] text-xs font-semibold cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApplyPasteModal}
+                  className="h-9 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer flex items-center gap-1.5"
+                >
+                  <span className="material-symbols-outlined text-[15px]">playlist_add_check</span>
+                  Masukkan ke Baris Tabel
                 </button>
               </div>
             </div>

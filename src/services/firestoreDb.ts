@@ -681,6 +681,7 @@ export async function saveUploadedDrToFirestore(
   parsedRows: Array<{
     channel: string;
     lot: string;
+    sku?: string;
     qty: number;
     drDate: string;
     expired: string;
@@ -732,6 +733,7 @@ export async function saveUploadedDrToFirestore(
   for (const row of parsedRows) {
     const rawLotNo = toValidDocId(String(row.lot || "").toUpperCase(), "");
     if (!rawLotNo) continue;
+    const rowSku = clampStr(row.sku, 80);
 
     // 1. Ensure Hybrid
     const hybName = clampStr(String(row.hybrid || "ADV808").toUpperCase(), 100, "ADV808");
@@ -746,6 +748,7 @@ export async function saveUploadedDrToFirestore(
       hybDoc = {
         doc_id: hybId,
         hybrid_name: hybName,
+        ...(rowSku ? { sku: rowSku } : {}),
         crop_type: toStrictDivision(row.crops),
       };
       existingHybridsByClean.set(hybKey, hybDoc);
@@ -808,11 +811,13 @@ export async function saveUploadedDrToFirestore(
     const cleanLotKey = cleanForMatch(rawLotNo);
     const existingLot = existingLotsById.get(rawLotNo) || existingLotsByClean.get(cleanLotKey);
     const lotNo = existingLot ? toValidDocId(existingLot.doc_id) : rawLotNo;
+    const effectiveSku = rowSku || existingLot?.sku || hybDoc?.sku || "";
 
     if (!existingLot && !touchedLotIds.has(lotNo)) {
       const newLot: LotFsDoc = {
         doc_id: lotNo,
         hybrid_id: hybDoc ? hybDoc.doc_id : null,
+        ...(effectiveSku ? { sku: effectiveSku } : {}),
         shipping_date: shippingDate,
         exp_date: expDate,
         initial_dr_kg: qtyKg,
@@ -834,6 +839,7 @@ export async function saveUploadedDrToFirestore(
         docId: lotNo,
         data: {
           hybrid_id: existingLot.hybrid_id || (hybDoc ? hybDoc.doc_id : null),
+          ...(effectiveSku ? { sku: effectiveSku } : {}),
           shipping_date: existingLot.shipping_date || shippingDate,
           exp_date: existingLot.exp_date || expDate,
           initial_dr_kg: (existingLot.initial_dr_kg || 0) + qtyKg,
@@ -856,6 +862,7 @@ export async function saveUploadedDrToFirestore(
         shipping_date: shippingDate,
         partner_id: pDoc ? pDoc.doc_id : null,
         lot_no: lotNo,
+        ...(effectiveSku ? { sku: effectiveSku } : {}),
         exp_date: expDate,
         shipped_qty_kg: qtyKg,
         ownerUid,
@@ -1001,6 +1008,7 @@ export async function addHybridFirestore(
   user: User | null | undefined,
   params: {
     hybrid_name: string;
+    sku?: string | null;
     crop_type: "Field Corn" | "Vegetables";
     existingHybrids: HybridFsDoc[];
   },
@@ -1008,6 +1016,7 @@ export async function addHybridFirestore(
   const ownerUid = user?.uid || "public";
   const cleanName = clampStr(params.hybrid_name.toUpperCase(), 100);
   if (!cleanName) throw new Error("Nama hybrid tidak boleh kosong.");
+  const skuVal = clampStr(params.sku, 80);
 
   const existingIds = new Set(params.existingHybrids.map((h) => toValidDocId(h.doc_id)));
   let nextNum = params.existingHybrids.length + 1;
@@ -1019,6 +1028,7 @@ export async function addHybridFirestore(
   const newDoc: HybridFsDoc = {
     doc_id: docId,
     hybrid_name: cleanName,
+    ...(skuVal ? { sku: skuVal } : {}),
     crop_type: toStrictDivision(params.crop_type),
   };
 
@@ -1044,6 +1054,7 @@ export async function addLotFirestore(
   params: {
     lot_no: string;
     hybrid_id: string | null;
+    sku?: string | null;
     new_hybrid_name?: string;
     crop_type?: "Field Corn" | "Vegetables";
     shipping_date: string;
@@ -1056,6 +1067,7 @@ export async function addLotFirestore(
   const ownerUid = user?.uid || "public";
   const lotNo = toValidDocId(String(params.lot_no || "").toUpperCase(), "");
   if (!lotNo) throw new Error("Nomor Lot tidak boleh kosong.");
+  const skuVal = clampStr(params.sku, 80);
 
   const batch = writeBatch(db);
   let finalHybridId = params.hybrid_id ? toValidDocId(params.hybrid_id) : null;
@@ -1078,6 +1090,7 @@ export async function addLotFirestore(
       batch.set(doc(db, "hybrids", hybId), {
         doc_id: hybId,
         hybrid_name: hybName,
+        ...(skuVal ? { sku: skuVal } : {}),
         crop_type: toStrictDivision(params.crop_type),
         ownerUid,
         createdAt: serverTimestamp(),
@@ -1090,6 +1103,7 @@ export async function addLotFirestore(
   const newLot: LotFsDoc = {
     doc_id: lotNo,
     hybrid_id: finalHybridId,
+    ...(skuVal ? { sku: skuVal } : {}),
     shipping_date: clampStr(toIsoDateStr(params.shipping_date), 20),
     exp_date: clampStr(toIsoDateStr(params.exp_date || extractExpFromLot(lotNo)), 20),
     initial_dr_kg: Number.isFinite(numDr) && numDr >= 0 ? numDr : 0,
@@ -1099,6 +1113,7 @@ export async function addLotFirestore(
   if (existingLot) {
     batch.update(doc(db, "lots", lotNo), {
       hybrid_id: newLot.hybrid_id,
+      ...(skuVal ? { sku: skuVal } : existingLot.sku ? { sku: "" } : {}),
       shipping_date: newLot.shipping_date,
       exp_date: newLot.exp_date,
       initial_dr_kg: newLot.initial_dr_kg,
@@ -1131,6 +1146,7 @@ export async function addDrShipmentFirestore(
     shipping_date: string;
     partner_id: string | null;
     lot_no: string;
+    sku?: string | null;
     exp_date: string;
     shipped_qty_kg: number;
     hybrid_id?: string | null;
@@ -1141,6 +1157,7 @@ export async function addDrShipmentFirestore(
   const ownerUid = user?.uid || "public";
   const lotNo = toValidDocId(String(params.lot_no || "").toUpperCase(), "");
   if (!lotNo) throw new Error("Nomor Lot wajib diisi.");
+  const skuVal = clampStr(params.sku, 80);
 
   const shippingDate = clampStr(
     toIsoDateStr(params.shipping_date) || new Date().toISOString().slice(0, 10),
@@ -1164,6 +1181,7 @@ export async function addDrShipmentFirestore(
     batch.set(doc(db, "lots", lotNo), {
       doc_id: lotNo,
       hybrid_id: params.hybrid_id ? toValidDocId(params.hybrid_id) : null,
+      ...(skuVal ? { sku: skuVal } : {}),
       shipping_date: shippingDate,
       exp_date: expDate,
       initial_dr_kg: qtyKg,
@@ -1174,6 +1192,7 @@ export async function addDrShipmentFirestore(
   } else {
     batch.update(doc(db, "lots", lotNo), {
       initial_dr_kg: (existingLot.initial_dr_kg || 0) + qtyKg,
+      ...(skuVal && !existingLot.sku ? { sku: skuVal } : {}),
       updatedAt: serverTimestamp(),
     });
   }
@@ -1183,6 +1202,7 @@ export async function addDrShipmentFirestore(
     shipping_date: shippingDate,
     partner_id: params.partner_id ? toValidDocId(params.partner_id) : null,
     lot_no: lotNo,
+    ...(skuVal ? { sku: skuVal } : {}),
     exp_date: expDate,
     shipped_qty_kg: qtyKg,
   };
@@ -1210,6 +1230,7 @@ export async function addOpnameLogFirestore(
   params: {
     partner_id: string | null;
     lot_no: string;
+    sku?: string | null;
     checker_id: string | null;
     crop_year: string;
     monthKey: (typeof FISCAL_MONTH_COLS)[number]["key"];
@@ -1223,6 +1244,7 @@ export async function addOpnameLogFirestore(
   const ownerUid = user?.uid || "public";
   const lotNo = toValidDocId(String(params.lot_no || "").toUpperCase(), "");
   if (!lotNo) throw new Error("Nomor Lot wajib diisi.");
+  const skuVal = clampStr(params.sku, 80);
 
   const partnerId = params.partner_id ? toValidDocId(params.partner_id) : null;
   const checkerId = params.checker_id ? toValidDocId(params.checker_id) : null;
@@ -1243,6 +1265,7 @@ export async function addOpnameLogFirestore(
     batch.set(doc(db, "lots", lotNo), {
       doc_id: lotNo,
       hybrid_id: null,
+      ...(skuVal ? { sku: skuVal } : {}),
       shipping_date: "",
       exp_date: clampStr(toIsoDateStr(extractExpFromLot(lotNo)), 20),
       initial_dr_kg: 0,
@@ -1257,6 +1280,7 @@ export async function addOpnameLogFirestore(
     batch.update(logRef, {
       partner_id: partnerId,
       lot_no: lotNo,
+      ...(skuVal ? { sku: skuVal } : {}),
       checker_id: checkerId ?? existingLog.checker_id ?? null,
       crop_year: cropYear,
       [params.monthKey]: cell,
@@ -1267,6 +1291,7 @@ export async function addOpnameLogFirestore(
       doc_id: logId,
       partner_id: partnerId,
       lot_no: lotNo,
+      ...(skuVal ? { sku: skuVal } : {}),
       checker_id: checkerId,
       crop_year: cropYear,
       ownerUid,
@@ -1337,7 +1362,7 @@ export async function ensureSuperUserAdityaFirestore(
  */
 export async function bulkAddHybridsFirestore(
   user: User | null | undefined,
-  rows: Array<{ hybrid_name: string; crop_type: "Field Corn" | "Vegetables" }>,
+  rows: Array<{ hybrid_name: string; sku?: string | null; crop_type: "Field Corn" | "Vegetables" }>,
   existingHybrids: HybridFsDoc[],
 ): Promise<number> {
   const ownerUid = user?.uid || "public";
@@ -1355,13 +1380,19 @@ export async function bulkAddHybridsFirestore(
     const key = cleanForMatch(cleanName);
     if (existingByName.has(key)) continue;
 
+    const skuVal = clampStr(r.sku, 80);
     let docId = `HYB-${String(nextNum++).padStart(3, "0")}`;
     while (existingIds.has(docId)) {
       docId = `HYB-${String(nextNum++).padStart(3, "0")}`;
     }
     existingIds.add(docId);
     const crop = toStrictDivision(r.crop_type);
-    existingByName.set(key, { doc_id: docId, hybrid_name: cleanName, crop_type: crop });
+    existingByName.set(key, {
+      doc_id: docId,
+      hybrid_name: cleanName,
+      ...(skuVal ? { sku: skuVal } : {}),
+      crop_type: crop,
+    });
     ops.push({
       type: "create" as const,
       colName: "hybrids",
@@ -1369,6 +1400,7 @@ export async function bulkAddHybridsFirestore(
       data: {
         doc_id: docId,
         hybrid_name: cleanName,
+        ...(skuVal ? { sku: skuVal } : {}),
         crop_type: crop,
         ownerUid,
       },
@@ -1388,6 +1420,7 @@ export async function bulkAddLotsFirestore(
   rows: Array<{
     lot_no: string;
     hybrid_id: string | null;
+    sku?: string | null;
     shipping_date: string;
     exp_date: string;
     initial_dr_kg: number;
@@ -1395,14 +1428,16 @@ export async function bulkAddLotsFirestore(
   existingLots: LotFsDoc[],
 ): Promise<number> {
   const ownerUid = user?.uid || "public";
-  const existingLotIds = new Set(existingLots.map((l) => toValidDocId(l.doc_id)));
+  const existingLotMap = new Map(existingLots.map((l) => [toValidDocId(l.doc_id), l]));
   const opsMap = new Map<string, any>();
 
   for (const r of rows) {
     const lotNo = toValidDocId(String(r.lot_no || "").toUpperCase(), "");
     if (!lotNo) continue;
     const numDr = Number(r.initial_dr_kg);
-    const isUpdate = existingLotIds.has(lotNo);
+    const existingLot = existingLotMap.get(lotNo);
+    const isUpdate = Boolean(existingLot);
+    const skuVal = clampStr(r.sku, 80);
     opsMap.set(lotNo, {
       type: (isUpdate ? "update" : "create") as "create" | "update",
       colName: "lots",
@@ -1410,6 +1445,7 @@ export async function bulkAddLotsFirestore(
       data: {
         doc_id: lotNo,
         hybrid_id: r.hybrid_id ? toValidDocId(r.hybrid_id) : null,
+        ...(skuVal ? { sku: skuVal } : isUpdate && existingLot?.sku ? { sku: "" } : {}),
         shipping_date: clampStr(toIsoDateStr(r.shipping_date), 20),
         exp_date: clampStr(toIsoDateStr(r.exp_date || extractExpFromLot(lotNo)), 20),
         initial_dr_kg: Number.isFinite(numDr) && numDr >= 0 ? numDr : 0,
@@ -1434,6 +1470,7 @@ export async function bulkAddDrShipmentsFirestore(
     shipping_date: string;
     partner_id: string | null;
     lot_no: string;
+    sku?: string | null;
     exp_date: string;
     shipped_qty_kg: number;
   }>,
@@ -1447,7 +1484,16 @@ export async function bulkAddDrShipmentsFirestore(
 
   const lotDelta = new Map<
     string,
-    { exists: boolean; baseKg: number; addKg: number; shippingDate: string; expDate: string; hybridId: string | null }
+    {
+      exists: boolean;
+      baseKg: number;
+      addKg: number;
+      shippingDate: string;
+      expDate: string;
+      hybridId: string | null;
+      sku: string;
+      hadSku: boolean;
+    }
   >();
   const drOps: any[] = [];
 
@@ -1463,11 +1509,13 @@ export async function bulkAddDrShipmentsFirestore(
     const expDate = clampStr(toIsoDateStr(r.exp_date || extractExpFromLot(lotNo)), 20);
     const numQty = Number(r.shipped_qty_kg);
     const qtyKg = Number.isFinite(numQty) && numQty >= 0 ? numQty : 0;
+    const skuVal = clampStr(r.sku, 80);
 
     const existingLot = existingLotMap.get(lotNo);
     const prevPending = lotDelta.get(lotNo);
     if (prevPending) {
       prevPending.addKg += qtyKg;
+      if (!prevPending.sku && skuVal) prevPending.sku = skuVal;
     } else {
       lotDelta.set(lotNo, {
         exists: Boolean(existingLot),
@@ -1476,6 +1524,8 @@ export async function bulkAddDrShipmentsFirestore(
         shippingDate: existingLot?.shipping_date || shippingDate,
         expDate: existingLot?.exp_date || expDate,
         hybridId: existingLot?.hybrid_id || null,
+        sku: clampStr(existingLot?.sku || skuVal, 80),
+        hadSku: Boolean(existingLot?.sku),
       });
     }
 
@@ -1494,6 +1544,7 @@ export async function bulkAddDrShipmentsFirestore(
         shipping_date: shippingDate,
         partner_id: r.partner_id ? toValidDocId(r.partner_id) : null,
         lot_no: lotNo,
+        ...(skuVal ? { sku: skuVal } : {}),
         exp_date: expDate,
         shipped_qty_kg: qtyKg,
         ownerUid,
@@ -1510,6 +1561,7 @@ export async function bulkAddDrShipmentsFirestore(
     data: {
       doc_id: lotNo,
       hybrid_id: info.hybridId,
+      ...(info.sku ? { sku: info.sku } : {}),
       shipping_date: info.shippingDate,
       exp_date: info.expDate,
       initial_dr_kg: info.baseKg + info.addKg,
@@ -1530,6 +1582,7 @@ export async function bulkAddOpnameLogsFirestore(
   rows: Array<{
     partner_id: string | null;
     lot_no: string;
+    sku?: string | null;
     checker_id: string | null;
     crop_year: string;
     months: Partial<Record<(typeof FISCAL_MONTH_COLS)[number]["key"], MonthlyOpnameCell | null>>;
@@ -1547,6 +1600,7 @@ export async function bulkAddOpnameLogsFirestore(
   for (const r of rows) {
     const lotNo = toValidDocId(String(r.lot_no || "").toUpperCase(), "");
     if (!lotNo) continue;
+    const skuVal = clampStr(r.sku, 80);
 
     if (!existingLotIds.has(lotNo) && !newLotOpsMap.has(lotNo)) {
       newLotOpsMap.set(lotNo, {
@@ -1556,6 +1610,7 @@ export async function bulkAddOpnameLogsFirestore(
         data: {
           doc_id: lotNo,
           hybrid_id: null,
+          ...(skuVal ? { sku: skuVal } : {}),
           shipping_date: "",
           exp_date: clampStr(toIsoDateStr(extractExpFromLot(lotNo)), 20),
           initial_dr_kg: 0,
@@ -1574,6 +1629,7 @@ export async function bulkAddOpnameLogsFirestore(
       const updateData: Record<string, any> = {
         partner_id: partnerId,
         lot_no: lotNo,
+        ...(skuVal ? { sku: skuVal } : {}),
         checker_id: checkerId ?? existingLog.checker_id ?? null,
         crop_year: cropYear,
       };
@@ -1598,6 +1654,7 @@ export async function bulkAddOpnameLogsFirestore(
         doc_id: logId,
         partner_id: partnerId,
         lot_no: lotNo,
+        ...(skuVal ? { sku: skuVal } : {}),
         checker_id: checkerId,
         crop_year: cropYear,
         ownerUid,
@@ -1785,19 +1842,23 @@ export async function bulkDeleteCollectionDocsFirestore(
  * Bulk update existing Hybrid documents in Firestore /hybrids.
  */
 export async function bulkUpdateHybridsFirestore(
-  rows: Array<{ doc_id: string; hybrid_name: string; crop_type: "Field Corn" | "Vegetables" }>,
+  rows: Array<{ doc_id: string; hybrid_name: string; sku?: string | null; hadSku?: boolean; crop_type: "Field Corn" | "Vegetables" }>,
 ): Promise<number> {
   const ops = rows
     .filter((r) => toValidDocId(r.doc_id, "") && clampStr(r.hybrid_name, 100))
-    .map((r) => ({
-      type: "update" as const,
-      colName: "hybrids",
-      docId: toValidDocId(r.doc_id),
-      data: {
-        hybrid_name: clampStr(String(r.hybrid_name).toUpperCase(), 100),
-        crop_type: toStrictDivision(r.crop_type),
-      },
-    }));
+    .map((r) => {
+      const skuVal = clampStr(r.sku, 80);
+      return {
+        type: "update" as const,
+        colName: "hybrids",
+        docId: toValidDocId(r.doc_id),
+        data: {
+          hybrid_name: clampStr(String(r.hybrid_name).toUpperCase(), 100),
+          ...(skuVal ? { sku: skuVal } : r.hadSku ? { sku: "" } : {}),
+          crop_type: toStrictDivision(r.crop_type),
+        },
+      };
+    });
 
   if (ops.length === 0) throw new Error("Isi nama hybrid yang valid untuk disimpan.");
   await commitInChunks(ops, 15);
@@ -1811,6 +1872,8 @@ export async function bulkUpdateLotsFirestore(
   rows: Array<{
     doc_id: string;
     hybrid_id: string | null;
+    sku?: string | null;
+    hadSku?: boolean;
     shipping_date: string;
     exp_date: string;
     initial_dr_kg: number;
@@ -1821,12 +1884,14 @@ export async function bulkUpdateLotsFirestore(
     .map((r) => {
       const lotId = toValidDocId(r.doc_id);
       const numDr = Number(r.initial_dr_kg);
+      const skuVal = clampStr(r.sku, 80);
       return {
         type: "update" as const,
         colName: "lots",
         docId: lotId,
         data: {
           hybrid_id: r.hybrid_id ? toValidDocId(r.hybrid_id) : null,
+          ...(skuVal ? { sku: skuVal } : r.hadSku ? { sku: "" } : {}),
           shipping_date: clampStr(toIsoDateStr(r.shipping_date), 20),
           exp_date: clampStr(toIsoDateStr(r.exp_date || extractExpFromLot(lotId)), 20),
           initial_dr_kg: Number.isFinite(numDr) && numDr >= 0 ? numDr : 0,
@@ -1849,6 +1914,8 @@ export async function bulkUpdateDrShipmentsFirestore(
     shipping_date: string;
     partner_id: string | null;
     lot_no: string;
+    sku?: string | null;
+    hadSku?: boolean;
     exp_date: string;
     shipped_qty_kg: number;
   }>,
@@ -1872,6 +1939,7 @@ export async function bulkUpdateDrShipmentsFirestore(
     const expDate = clampStr(toIsoDateStr(r.exp_date || extractExpFromLot(lotNo)), 20);
     const numQty = Number(r.shipped_qty_kg);
     const qtyKg = Number.isFinite(numQty) && numQty >= 0 ? numQty : 0;
+    const skuVal = clampStr(r.sku, 80);
 
     if (!existingLotIds.has(lotNo) && !newLotOps.has(lotNo)) {
       newLotOps.set(lotNo, {
@@ -1881,6 +1949,7 @@ export async function bulkUpdateDrShipmentsFirestore(
         data: {
           doc_id: lotNo,
           hybrid_id: null,
+          ...(skuVal ? { sku: skuVal } : {}),
           shipping_date: shippingDate,
           exp_date: expDate,
           initial_dr_kg: qtyKg,
@@ -1897,6 +1966,7 @@ export async function bulkUpdateDrShipmentsFirestore(
         shipping_date: shippingDate,
         partner_id: r.partner_id ? toValidDocId(r.partner_id) : null,
         lot_no: lotNo,
+        ...(skuVal ? { sku: skuVal } : r.hadSku ? { sku: "" } : {}),
         exp_date: expDate,
         shipped_qty_kg: qtyKg,
       },
@@ -1918,6 +1988,8 @@ export async function bulkUpdateOpnameLogsFirestore(
     doc_id: string;
     partner_id: string | null;
     lot_no: string;
+    sku?: string | null;
+    hadSku?: boolean;
     checker_id: string | null;
     crop_year: string;
     months: Partial<Record<(typeof FISCAL_MONTH_COLS)[number]["key"], MonthlyOpnameCell | null>>;
@@ -1933,6 +2005,7 @@ export async function bulkUpdateOpnameLogsFirestore(
     const docId = toValidDocId(r.doc_id, "");
     const lotNo = toValidDocId(String(r.lot_no || "").toUpperCase(), "");
     if (!docId || !lotNo) continue;
+    const skuVal = clampStr(r.sku, 80);
 
     if (!existingLotIds.has(lotNo) && !newLotOps.has(lotNo)) {
       newLotOps.set(lotNo, {
@@ -1942,6 +2015,7 @@ export async function bulkUpdateOpnameLogsFirestore(
         data: {
           doc_id: lotNo,
           hybrid_id: null,
+          ...(skuVal ? { sku: skuVal } : {}),
           shipping_date: "",
           exp_date: clampStr(toIsoDateStr(extractExpFromLot(lotNo)), 20),
           initial_dr_kg: 0,
@@ -1953,6 +2027,7 @@ export async function bulkUpdateOpnameLogsFirestore(
     const updateData: Record<string, any> = {
       partner_id: r.partner_id ? toValidDocId(r.partner_id) : null,
       lot_no: lotNo,
+      ...(skuVal ? { sku: skuVal } : r.hadSku ? { sku: "" } : {}),
       checker_id: r.checker_id ? toValidDocId(r.checker_id) : null,
       crop_year: clampStr(r.crop_year || "FY2026", 12, "FY2026"),
     };

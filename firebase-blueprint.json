@@ -100,6 +100,7 @@
       "properties": {
         "doc_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "hybrid_name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "sku": { "type": "string", "maxLength": 80 },
         "crop_type": { "type": "string", "enum": ["Field Corn", "Vegetables"] },
         "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "createdAt": { "type": "string", "format": "date-time" },
@@ -114,6 +115,7 @@
       "properties": {
         "doc_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "hybrid_id": { "type": "string", "maxLength": 128 },
+        "sku": { "type": "string", "maxLength": 80 },
         "shipping_date": { "type": "string", "maxLength": 20 },
         "exp_date": { "type": "string", "maxLength": 20 },
         "initial_dr_kg": { "type": "number" },
@@ -132,6 +134,7 @@
         "shipping_date": { "type": "string", "minLength": 1, "maxLength": 20 },
         "partner_id": { "type": "string", "maxLength": 128 },
         "lot_no": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sku": { "type": "string", "maxLength": 80 },
         "exp_date": { "type": "string", "maxLength": 20 },
         "shipped_qty_kg": { "type": "number" },
         "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
@@ -148,6 +151,7 @@
         "doc_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "partner_id": { "type": "string", "maxLength": 128 },
         "lot_no": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sku": { "type": "string", "maxLength": 80 },
         "checker_id": { "type": "string", "maxLength": 128 },
         "crop_year": { "type": "string", "minLength": 4, "maxLength": 12 },
         "apr": { "type": "object" },

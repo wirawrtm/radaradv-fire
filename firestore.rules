@@ -169,9 +169,10 @@ service cloud.firestore {
 
     function isValidHybrid(data) {
       return data.keys().hasAll(['doc_id', 'hybrid_name', 'crop_type', 'ownerUid', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['doc_id', 'hybrid_name', 'crop_type', 'ownerUid', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['doc_id', 'hybrid_name', 'sku', 'crop_type', 'ownerUid', 'createdAt', 'updatedAt']) &&
         isValidId(data.doc_id) &&
         isStr(data.hybrid_name, 1, 100) &&
+        (!('sku' in data) || isOptStr(data.sku, 80)) &&
         isValidDivision(data.crop_type) &&
         isValidId(data.ownerUid) &&
         data.createdAt is timestamp &&
@@ -180,9 +181,10 @@ service cloud.firestore {
 
     function isValidLot(data) {
       return data.keys().hasAll(['doc_id', 'shipping_date', 'exp_date', 'initial_dr_kg', 'ownerUid', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['doc_id', 'hybrid_id', 'shipping_date', 'exp_date', 'initial_dr_kg', 'ownerUid', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['doc_id', 'hybrid_id', 'sku', 'shipping_date', 'exp_date', 'initial_dr_kg', 'ownerUid', 'createdAt', 'updatedAt']) &&
         isValidId(data.doc_id) &&
         (!('hybrid_id' in data) || isOptId(data.hybrid_id)) &&
+        (!('sku' in data) || isOptStr(data.sku, 80)) &&
         isStr(data.shipping_date, 0, 20) &&
         isStr(data.exp_date, 0, 20) &&
         (data.initial_dr_kg is int || data.initial_dr_kg is float) && data.initial_dr_kg >= 0 &&
@@ -193,11 +195,12 @@ service cloud.firestore {
 
     function isValidDrShipment(data) {
       return data.keys().hasAll(['doc_id', 'shipping_date', 'lot_no', 'exp_date', 'shipped_qty_kg', 'ownerUid', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['doc_id', 'shipping_date', 'partner_id', 'lot_no', 'exp_date', 'shipped_qty_kg', 'ownerUid', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['doc_id', 'shipping_date', 'partner_id', 'lot_no', 'sku', 'exp_date', 'shipped_qty_kg', 'ownerUid', 'createdAt', 'updatedAt']) &&
         isValidId(data.doc_id) &&
         isStr(data.shipping_date, 1, 20) &&
         (!('partner_id' in data) || isOptId(data.partner_id)) &&
         isValidId(data.lot_no) &&
+        (!('sku' in data) || isOptStr(data.sku, 80)) &&
         isStr(data.exp_date, 0, 20) &&
         (data.shipped_qty_kg is int || data.shipped_qty_kg is float) && data.shipped_qty_kg >= 0 &&
         isValidId(data.ownerUid) &&
@@ -208,13 +211,14 @@ service cloud.firestore {
     function isValidOpnameLog(data) {
       return data.keys().hasAll(['doc_id', 'lot_no', 'crop_year', 'ownerUid', 'createdAt', 'updatedAt']) &&
         data.keys().hasOnly([
-          'doc_id', 'partner_id', 'lot_no', 'checker_id', 'crop_year',
+          'doc_id', 'partner_id', 'lot_no', 'sku', 'checker_id', 'crop_year',
           'apr', 'mei', 'jun', 'jul', 'ags', 'sep', 'okt', 'nov', 'des', 'jan', 'feb', 'mar',
           'ownerUid', 'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.doc_id) &&
         (!('partner_id' in data) || isOptId(data.partner_id)) &&
         isValidId(data.lot_no) &&
+        (!('sku' in data) || isOptStr(data.sku, 80)) &&
         (!('checker_id' in data) || isOptId(data.checker_id)) &&
         isStr(data.crop_year, 4, 12) &&
         (!('apr' in data) || isValidMonthCell(data.apr)) &&
@@ -364,7 +368,7 @@ service cloud.firestore {
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['hybrid_name', 'crop_type', 'updatedAt']);
+        incoming().diff(existing()).affectedKeys().hasOnly(['hybrid_name', 'sku', 'crop_type', 'updatedAt']);
       allow delete: if isValidId(hybridId);
     }
 
@@ -388,7 +392,7 @@ service cloud.firestore {
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['hybrid_id', 'shipping_date', 'exp_date', 'initial_dr_kg', 'updatedAt']);
+        incoming().diff(existing()).affectedKeys().hasOnly(['hybrid_id', 'sku', 'shipping_date', 'exp_date', 'initial_dr_kg', 'updatedAt']);
       allow delete: if isValidId(lotNo);
     }
 
@@ -413,7 +417,7 @@ service cloud.firestore {
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['shipping_date', 'partner_id', 'lot_no', 'exp_date', 'shipped_qty_kg', 'updatedAt']);
+        incoming().diff(existing()).affectedKeys().hasOnly(['shipping_date', 'partner_id', 'lot_no', 'sku', 'exp_date', 'shipped_qty_kg', 'updatedAt']);
       allow delete: if isValidId(drId);
     }
 
@@ -444,7 +448,7 @@ service cloud.firestore {
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly([
-          'partner_id', 'lot_no', 'checker_id', 'crop_year',
+          'partner_id', 'lot_no', 'sku', 'checker_id', 'crop_year',
           'apr', 'mei', 'jun', 'jul', 'ags', 'sep', 'okt', 'nov', 'des', 'jan', 'feb', 'mar',
           'updatedAt'
         ]);
