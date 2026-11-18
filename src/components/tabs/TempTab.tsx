@@ -5,10 +5,17 @@ import { PartnerEditModal } from "../modals/PartnerEditModal";
 import { PartnerDeleteModal } from "../modals/PartnerDeleteModal";
 import { EmployeeEditModal } from "../modals/EmployeeEditModal";
 import { EmployeeDeleteModal } from "../modals/EmployeeDeleteModal";
-import { DatabaseAddModal, type OperationalCollectionKey } from "../modals/DatabaseAddModal";
 import { useFirebase } from "../../contexts/FirebaseContext";
 import { buildNormalizedCollections } from "../../utils/firestoreNormalization";
-import { saveUploadedDrToFirestore } from "../../services/firestoreDb";
+import {
+  bulkAddDrShipmentsFirestore,
+  bulkAddEmployeesFirestore,
+  bulkAddHybridsFirestore,
+  bulkAddLotsFirestore,
+  bulkAddOpnameLogsFirestore,
+  bulkAddPartnersFirestore,
+  saveUploadedDrToFirestore,
+} from "../../services/firestoreDb";
 import firestoreRulesText from "../../../firestore.rules?raw";
 
 export interface TempTabProps {
@@ -175,6 +182,7 @@ export const TempTab: React.FC<TempTabProps> = ({
   );
   const {
     firebaseUser,
+    firestoreDataset,
     isAuthorizedFirebase,
     hasFirestoreData,
     isLoadingFirestore,
@@ -197,7 +205,6 @@ export const TempTab: React.FC<TempTabProps> = ({
   const [feedback, setFeedback] = useState<string | null>(null);
   const [showRulesPanel, setShowRulesPanel] = useState(false);
   const [copiedRules, setCopiedRules] = useState(false);
-  const [isDbAddModalOpen, setIsDbAddModalOpen] = useState(false);
 
   const mergedDrSales = useMemo(
     () => [...(drSalesData || []), ...uploadedDrRows],
@@ -1260,6 +1267,328 @@ export const TempTab: React.FC<TempTabProps> = ({
 
   const currentMeta = collectionsMeta.find((c) => c.key === activeCollection)!;
 
+  const [inlineDrafts, setInlineDrafts] = useState<Record<CollectionKey, any[]>>({
+    opname_logs: [],
+    dr_shipments: [],
+    lots: [],
+    hybrids: [],
+    partners: [],
+    employees: [],
+  });
+  const [isSavingBulkDrafts, setIsSavingBulkDrafts] = useState(false);
+  const [bulkDraftError, setBulkDraftError] = useState<string | null>(null);
+
+  const getEmployeeLevelFromPos = useCallback((pos: string): number => {
+    const p = String(pos || "").toLowerCase();
+    if (p.includes("business analyst") || p.includes("admin") || p.includes("country head")) return 5;
+    if (p.includes("commercial lead") || (p.includes("sales manager") && !p.includes("area"))) return 4;
+    if (p.includes("area sales manager")) return 3;
+    if (p.includes("sales agronomist")) return 2;
+    return 1;
+  }, []);
+
+  const createEmptyDraftRow = useCallback(
+    (colKey: CollectionKey) => {
+      const _draftId = `draft_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const defaultPartnerId = partnersCol[0]?.doc_id || "";
+      const defaultEmpId = employeesCol[0]?.doc_id || "";
+      const defaultHybridId = hybridsCol[0]?.doc_id || "";
+
+      if (colKey === "hybrids") {
+        return { _draftId, hybrid_name: "", crop_type: effectiveDivision };
+      }
+      if (colKey === "lots") {
+        return {
+          _draftId,
+          lot_no: "",
+          hybrid_id: defaultHybridId,
+          shipping_date: todayIso,
+          exp_date: "",
+          initial_dr_kg: "0",
+        };
+      }
+      if (colKey === "dr_shipments") {
+        return {
+          _draftId,
+          shipping_date: todayIso,
+          partner_id: defaultPartnerId,
+          lot_no: "",
+          exp_date: "",
+          shipped_qty_kg: "0",
+        };
+      }
+      if (colKey === "opname_logs") {
+        const months: Record<string, { in: string; idle: string; pog: string }> = {};
+        FISCAL_MONTH_COLS.forEach(({ key }) => {
+          months[key] = { in: "", idle: "", pog: "" };
+        });
+        return {
+          _draftId,
+          partner_id: defaultPartnerId,
+          lot_no: "",
+          checker_id: defaultEmpId,
+          crop_year: "FY2026",
+          months,
+        };
+      }
+      if (colKey === "partners") {
+        return {
+          _draftId,
+          partner_name: "",
+          category: allCategories[0] || "R1",
+          pic_employee_id: defaultEmpId,
+          division_group: effectiveDivision,
+          province: availableProvinces[0] || "",
+          area: "",
+        };
+      }
+      const defaultUpline =
+        employeesCol.find((e) => e.division_group === effectiveDivision && e.role_level === 2)?.doc_id || "";
+      return {
+        _draftId,
+        username: "",
+        password: "123",
+        full_name: "",
+        position: "Business Solution",
+        role_level: 1,
+        upline_id: defaultUpline,
+        division_group: effectiveDivision,
+        province: availableProvinces[0] || "",
+        area: "",
+      };
+    },
+    [partnersCol, employeesCol, hybridsCol, effectiveDivision, allCategories, availableProvinces],
+  );
+
+  const handleAddInlineRows = useCallback(
+    (colKey: CollectionKey, count = 1) => {
+      setBulkDraftError(null);
+      setViewMode("table");
+      setInlineDrafts((prev) => {
+        const added = Array.from({ length: count }, () => createEmptyDraftRow(colKey));
+        return { ...prev, [colKey]: [...prev[colKey], ...added] };
+      });
+    },
+    [createEmptyDraftRow],
+  );
+
+  const handleUpdateInlineDraft = useCallback(
+    (colKey: CollectionKey, draftId: string, patch: Record<string, any>) => {
+      setInlineDrafts((prev) => ({
+        ...prev,
+        [colKey]: prev[colKey].map((row) => {
+          if (row._draftId !== draftId) return row;
+          const next = { ...row, ...patch };
+          if ((colKey === "lots" || colKey === "dr_shipments") && typeof patch.lot_no === "string") {
+            const upperLot = patch.lot_no.toUpperCase();
+            next.lot_no = upperLot;
+            if (!row.exp_date || row.exp_date === extractExpFromLot(row.lot_no || "")) {
+              const matchedLot = lotsCol.find((l) => l.doc_id.toUpperCase() === upperLot.trim());
+              const derived = matchedLot?.exp_date || extractExpFromLot(upperLot);
+              if (derived && derived !== "N/A") next.exp_date = derived;
+            }
+          }
+          if (colKey === "employees" && typeof patch.position === "string") {
+            next.role_level = getEmployeeLevelFromPos(patch.position);
+          }
+          return next;
+        }),
+      }));
+    },
+    [lotsCol, getEmployeeLevelFromPos],
+  );
+
+  const handleUpdateOpnameMonthCell = useCallback(
+    (
+      draftId: string,
+      monthKey: string,
+      metric: "in" | "idle" | "pog",
+      val: string,
+    ) => {
+      setInlineDrafts((prev) => ({
+        ...prev,
+        opname_logs: prev.opname_logs.map((row) => {
+          if (row._draftId !== draftId) return row;
+          return {
+            ...row,
+            months: {
+              ...row.months,
+              [monthKey]: {
+                ...(row.months?.[monthKey] || { in: "", idle: "", pog: "" }),
+                [metric]: val,
+              },
+            },
+          };
+        }),
+      }));
+    },
+    [],
+  );
+
+  const handleDuplicateInlineDraft = useCallback((colKey: CollectionKey, row: any) => {
+    const cloned = {
+      ...JSON.parse(JSON.stringify(row)),
+      _draftId: `draft_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    };
+    setInlineDrafts((prev) => {
+      const idx = prev[colKey].findIndex((r) => r._draftId === row._draftId);
+      const nextArr = [...prev[colKey]];
+      nextArr.splice(idx + 1, 0, cloned);
+      return { ...prev, [colKey]: nextArr };
+    });
+  }, []);
+
+  const handleRemoveInlineDraft = useCallback((colKey: CollectionKey, draftId: string) => {
+    setInlineDrafts((prev) => ({
+      ...prev,
+      [colKey]: prev[colKey].filter((r) => r._draftId !== draftId),
+    }));
+  }, []);
+
+  const handleClearInlineDrafts = useCallback((colKey: CollectionKey) => {
+    setBulkDraftError(null);
+    setInlineDrafts((prev) => ({ ...prev, [colKey]: [] }));
+  }, []);
+
+  const handleSaveAllInlineDrafts = useCallback(async () => {
+    const drafts = inlineDrafts[activeCollection] || [];
+    if (drafts.length === 0) return;
+
+    setIsSavingBulkDrafts(true);
+    setBulkDraftError(null);
+
+    try {
+      const fsHybrids = firestoreDataset?.hybrids || [];
+      const fsLots = firestoreDataset?.lots || [];
+      const fsDrShipments = firestoreDataset?.dr_shipments || [];
+      const fsOpnameLogs = firestoreDataset?.opname_logs || [];
+      const fsPartners = firestoreDataset?.partners || [];
+      const fsEmployees = firestoreDataset?.employees || [];
+
+      let savedCount = 0;
+
+      if (activeCollection === "hybrids") {
+        savedCount = await bulkAddHybridsFirestore(
+          firebaseUser,
+          drafts.map((d) => ({
+            hybrid_name: d.hybrid_name,
+            crop_type: d.crop_type,
+          })),
+          fsHybrids,
+        );
+      } else if (activeCollection === "lots") {
+        savedCount = await bulkAddLotsFirestore(
+          firebaseUser,
+          drafts.map((d) => ({
+            lot_no: d.lot_no,
+            hybrid_id: d.hybrid_id || null,
+            shipping_date: d.shipping_date,
+            exp_date: d.exp_date,
+            initial_dr_kg: Number(d.initial_dr_kg) || 0,
+          })),
+          fsLots,
+        );
+      } else if (activeCollection === "dr_shipments") {
+        savedCount = await bulkAddDrShipmentsFirestore(
+          firebaseUser,
+          drafts.map((d) => ({
+            shipping_date: d.shipping_date,
+            partner_id: d.partner_id || null,
+            lot_no: d.lot_no,
+            exp_date: d.exp_date,
+            shipped_qty_kg: Number(d.shipped_qty_kg) || 0,
+          })),
+          fsLots,
+          fsDrShipments,
+        );
+      } else if (activeCollection === "opname_logs") {
+        savedCount = await bulkAddOpnameLogsFirestore(
+          firebaseUser,
+          drafts.map((d) => {
+            const parsedMonths: Record<string, MonthlyOpnameCell | null> = {};
+            FISCAL_MONTH_COLS.forEach(({ key }) => {
+              const cell = d.months?.[key];
+              if (
+                cell &&
+                (String(cell.in).trim() !== "" ||
+                  String(cell.idle).trim() !== "" ||
+                  String(cell.pog).trim() !== "")
+              ) {
+                parsedMonths[key] = {
+                  in: Number(cell.in) || 0,
+                  idle: Number(cell.idle) || 0,
+                  pog: Number(cell.pog) || 0,
+                };
+              }
+            });
+            return {
+              partner_id: d.partner_id || null,
+              lot_no: d.lot_no,
+              checker_id: d.checker_id || null,
+              crop_year: d.crop_year || "FY2026",
+              months: parsedMonths,
+            };
+          }),
+          fsLots,
+          fsOpnameLogs,
+        );
+      } else if (activeCollection === "partners") {
+        savedCount = await bulkAddPartnersFirestore(
+          firebaseUser,
+          drafts.map((d) => ({
+            partner_name: d.partner_name,
+            category: d.category || "R1",
+            pic_employee_id: d.pic_employee_id || null,
+            division_group: d.division_group || effectiveDivision,
+            province: d.province || "-",
+            area: d.area || d.province || "-",
+          })),
+          fsPartners,
+          fsEmployees,
+        );
+      } else if (activeCollection === "employees") {
+        const creds = await bulkAddEmployeesFirestore(
+          firebaseUser,
+          drafts.map((d) => ({
+            username: d.username,
+            full_name: d.full_name,
+            position: d.position || "Business Solution",
+            role_level: Number(d.role_level) || 1,
+            upline_id: d.upline_id || null,
+            division_group: d.division_group || effectiveDivision,
+            province: d.province || "-",
+            area: d.area || d.province || "-",
+            password: d.password || "123",
+          })),
+          fsEmployees,
+        );
+        savedCount = creds.length;
+        try {
+          const savedMap = JSON.parse(localStorage.getItem("radar_emp_passwords") || "{}");
+          creds.forEach((c) => {
+            if (c.password) {
+              savedMap[c.doc_id] = c.password;
+              if (c.username) savedMap[c.username] = c.password;
+            }
+          });
+          localStorage.setItem("radar_emp_passwords", JSON.stringify(savedMap));
+        } catch {
+          // ignore localStorage quota
+        }
+      }
+
+      setInlineDrafts((prev) => ({ ...prev, [activeCollection]: [] }));
+      showToast(`${savedCount} baris baru berhasil disimpan ke Firestore (${activeCollection}).`);
+    } catch (err: any) {
+      setBulkDraftError(err?.message || "Gagal menyimpan baris baru ke Firestore.");
+    } finally {
+      setIsSavingBulkDrafts(false);
+    }
+  }, [inlineDrafts, activeCollection, firestoreDataset, firebaseUser, effectiveDivision, showToast]);
+
+  const activeDrafts = inlineDrafts[activeCollection] || [];
+
   const renderFkBadge = (fkId: string | null, targetCol: CollectionKey) => {
     if (!fkId) return <span className="font-mono text-[11px] text-amber-600">null</span>;
     const tip = idTooltipMap[fkId] || fkId;
@@ -1580,47 +1909,11 @@ export const TempTab: React.FC<TempTabProps> = ({
 
           <button
             type="button"
-            onClick={() => {
-              if (activeCollection === "partners" && setPartnerEditModal) {
-                setPartnerEditModal({
-                  isOpen: true,
-                  item: {
-                    id: null,
-                    name: "",
-                    pic: userData?.name || "",
-                    category: "R1",
-                    province: "",
-                    group: effectiveDivision,
-                    isAdd: true,
-                  },
-                });
-              } else if (activeCollection === "employees" && setEmployeeEditModal) {
-                const defaultAgro = employeesCol.find(
-                  (e) => e.division_group === effectiveDivision && e.role_level === 2,
-                );
-                setEmployeeEditModal({
-                  isOpen: true,
-                  item: {
-                    name: "",
-                    user: "",
-                    position: "Business Solution",
-                    province: defaultAgro?.province || "",
-                    area: defaultAgro?.area || "",
-                    upline: activeLoginEmp?.full_name || defaultAgro?.full_name || "",
-                    password: "123",
-                    level: "1",
-                    group: effectiveDivision,
-                    isAdd: true,
-                  },
-                });
-              } else {
-                setIsDbAddModalOpen(true);
-              }
-            }}
+            onClick={() => handleAddInlineRows(activeCollection, 1)}
             className="h-9 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-mono font-semibold flex items-center gap-1 cursor-pointer shadow-sm"
           >
-            <span className="material-symbols-outlined text-[15px]">add_circle</span>
-            + Tambah Data
+            <span className="material-symbols-outlined text-[15px]">playlist_add</span>
+            + Tambah Baris
           </button>
 
           <button
@@ -1693,8 +1986,68 @@ export const TempTab: React.FC<TempTabProps> = ({
           </pre>
         </div>
       ) : (
-        /* View Mode: Pure Database Table (Strict Document ID & Foreign Keys) */
+        /* View Mode: Pure Database Table (Strict Document ID & Foreign Keys + Inline Multi-Row Drafts) */
         <div className="bg-white rounded-2xl border border-[#e0e0fa] overflow-hidden">
+          <datalist id="inline-lots-list">
+            {lotsCol.map((l) => (
+              <option key={l.doc_id} value={l.doc_id} />
+            ))}
+          </datalist>
+          <datalist id="inline-prov-list">
+            {(availableProvinces || []).map((prov) => (
+              <option key={prov} value={prov} />
+            ))}
+          </datalist>
+
+          {activeDrafts.length > 0 && (
+            <div className="px-4 py-2.5 bg-emerald-50 border-b border-emerald-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="text-xs text-emerald-950 flex flex-col gap-0.5">
+                <div className="font-bold flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[16px] text-emerald-700">edit_square</span>
+                  <span>
+                    {activeDrafts.length} baris baru siap diisi langsung pada tabel ({activeCollection})
+                  </span>
+                </div>
+                {bulkDraftError && (
+                  <p className="text-red-700 font-semibold text-[11px]">{bulkDraftError}</p>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleAddInlineRows(activeCollection, 1)}
+                  className="h-8 px-2.5 rounded-lg bg-white border border-emerald-300 hover:bg-emerald-100 text-emerald-900 font-mono text-[11px] font-bold cursor-pointer"
+                >
+                  +1 Baris
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAddInlineRows(activeCollection, 5)}
+                  className="h-8 px-2.5 rounded-lg bg-white border border-emerald-300 hover:bg-emerald-100 text-emerald-900 font-mono text-[11px] font-bold cursor-pointer"
+                >
+                  +5 Baris
+                </button>
+                <button
+                  type="button"
+                  disabled={isSavingBulkDrafts}
+                  onClick={() => handleClearInlineDrafts(activeCollection)}
+                  className="h-8 px-2.5 rounded-lg bg-white border border-red-200 hover:bg-red-50 text-red-700 font-mono text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  disabled={isSavingBulkDrafts}
+                  onClick={handleSaveAllInlineDrafts}
+                  className="h-8 px-3.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-mono text-[11px] font-bold cursor-pointer shadow-sm disabled:opacity-60 flex items-center gap-1"
+                >
+                  <span className="material-symbols-outlined text-[15px]">save</span>
+                  {isSavingBulkDrafts ? "Menyimpan..." : `Simpan Semua (${activeDrafts.length})`}
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="overflow-x-auto">
             {/* 1. opname_logs (Header Per Bulan: April -> Maret dengan IN, IDLE, POG) */}
             {activeCollection === "opname_logs" && (
@@ -1769,9 +2122,146 @@ export const TempTab: React.FC<TempTabProps> = ({
                       {FISCAL_MONTH_COLS.map((m) =>
                         renderHeaderCell("opname_logs", m.key, m.label, "center"),
                       )}
+                      {inlineDrafts.opname_logs.length > 0 && (
+                        <th className="py-2 px-3 text-right align-top font-bold text-[11px] text-[#434655] whitespace-nowrap">
+                          actions
+                        </th>
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#f1f0fa] text-[#181a2c]">
+                    {inlineDrafts.opname_logs.map((d) => (
+                      <tr key={d._draftId} className="bg-emerald-50/45 border-b border-emerald-200/70">
+                        <td className="py-2 px-2 whitespace-nowrap">
+                          <select
+                            value={d.partner_id}
+                            onChange={(e) =>
+                              handleUpdateInlineDraft("opname_logs", d._draftId, {
+                                partner_id: e.target.value,
+                              })
+                            }
+                            className="h-8 w-44 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                          >
+                            <option value="">-- Pilih Partner --</option>
+                            {partnersCol.map((p) => (
+                              <option key={p.doc_id} value={p.doc_id}>
+                                {p.doc_id} · {p.partner_name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="py-2 px-2 whitespace-nowrap">
+                          <input
+                            type="text"
+                            list="inline-lots-list"
+                            value={d.lot_no}
+                            onChange={(e) =>
+                              handleUpdateInlineDraft("opname_logs", d._draftId, {
+                                lot_no: e.target.value,
+                              })
+                            }
+                            placeholder="Nomor Lot*"
+                            className="h-8 w-32 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-bold uppercase outline-none"
+                          />
+                        </td>
+                        <td className="py-2 px-2 whitespace-nowrap">
+                          <select
+                            value={d.checker_id}
+                            onChange={(e) =>
+                              handleUpdateInlineDraft("opname_logs", d._draftId, {
+                                checker_id: e.target.value,
+                              })
+                            }
+                            className="h-8 w-40 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                          >
+                            <option value="">-- Pilih Checker --</option>
+                            {employeesCol.map((emp) => (
+                              <option key={emp.doc_id} value={emp.doc_id}>
+                                {emp.doc_id} · {emp.full_name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="py-2 px-2 whitespace-nowrap">
+                          <input
+                            type="text"
+                            value={d.crop_year}
+                            onChange={(e) =>
+                              handleUpdateInlineDraft("opname_logs", d._draftId, {
+                                crop_year: e.target.value,
+                              })
+                            }
+                            placeholder="FY2026"
+                            className="h-8 w-20 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none text-center"
+                          />
+                        </td>
+                        {FISCAL_MONTH_COLS.map(({ key }) => {
+                          const cell = d.months?.[key] || { in: "", idle: "", pog: "" };
+                          return (
+                            <td key={key} className="py-1.5 px-1.5 border-l border-emerald-200/70 whitespace-nowrap">
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  placeholder="in"
+                                  title={`${key.toUpperCase()} IN (Kg)`}
+                                  value={cell.in}
+                                  onChange={(e) =>
+                                    handleUpdateOpnameMonthCell(d._draftId, key, "in", e.target.value)
+                                  }
+                                  className="h-7 w-12 bg-white border border-blue-200 focus:border-blue-500 rounded px-1 text-[10px] text-center font-semibold text-blue-700 outline-none"
+                                />
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  placeholder="idl"
+                                  title={`${key.toUpperCase()} IDLE (Kg)`}
+                                  value={cell.idle}
+                                  onChange={(e) =>
+                                    handleUpdateOpnameMonthCell(d._draftId, key, "idle", e.target.value)
+                                  }
+                                  className="h-7 w-12 bg-white border border-amber-200 focus:border-amber-500 rounded px-1 text-[10px] text-center font-semibold text-amber-700 outline-none"
+                                />
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  placeholder="pog"
+                                  title={`${key.toUpperCase()} POG (Kg)`}
+                                  value={cell.pog}
+                                  onChange={(e) =>
+                                    handleUpdateOpnameMonthCell(d._draftId, key, "pog", e.target.value)
+                                  }
+                                  className="h-7 w-12 bg-white border border-emerald-300 focus:border-emerald-600 rounded px-1 text-[10px] text-center font-semibold text-emerald-700 outline-none"
+                                />
+                              </div>
+                            </td>
+                          );
+                        })}
+                        <td className="py-2 px-3 text-right whitespace-nowrap font-sans">
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleDuplicateInlineDraft("opname_logs", d)}
+                              title="Duplikat baris ini"
+                              className="px-2 py-1 rounded bg-white border border-emerald-300 hover:bg-emerald-100 text-emerald-800 text-[10px] font-bold cursor-pointer"
+                            >
+                              Copy
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveInlineDraft("opname_logs", d._draftId)}
+                              title="Hapus baris draft"
+                              className="px-2 py-1 rounded bg-red-50 hover:bg-red-100 text-red-600 text-[10px] font-bold cursor-pointer"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
                     {filteredLogs.map((l) => (
                       <tr key={l._key} className="hover:bg-[#f4f2ff]/30">
                         <td className="py-2.5 px-3 whitespace-nowrap">
@@ -1849,6 +2339,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                             </td>
                           );
                         })}
+                        {inlineDrafts.opname_logs.length > 0 && <td />}
                       </tr>
                     ))}
                   </tbody>
@@ -1908,9 +2399,110 @@ export const TempTab: React.FC<TempTabProps> = ({
                       {renderHeaderCell("dr_shipments", "lot_no", "lot_no (FK)")}
                       {renderHeaderCell("dr_shipments", "exp_date", "exp_date")}
                       {renderHeaderCell("dr_shipments", "shipped_qty_kg", "shipped_qty_kg", "right")}
+                      {inlineDrafts.dr_shipments.length > 0 && (
+                        <th className="py-2 px-4 text-right align-top font-bold text-[11px] text-[#434655]">
+                          actions
+                        </th>
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#f1f0fa] text-[#181a2c]">
+                    {inlineDrafts.dr_shipments.map((d) => (
+                      <tr key={d._draftId} className="bg-emerald-50/45 border-b border-emerald-200/70">
+                        <td className="py-2 px-4 text-[11px] text-emerald-700 font-semibold italic">
+                          (auto)
+                        </td>
+                        <td className="py-2 px-3">
+                          <input
+                            type="date"
+                            value={d.shipping_date}
+                            onChange={(e) =>
+                              handleUpdateInlineDraft("dr_shipments", d._draftId, {
+                                shipping_date: e.target.value,
+                              })
+                            }
+                            className="h-8 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                          />
+                        </td>
+                        <td className="py-2 px-3">
+                          <select
+                            value={d.partner_id}
+                            onChange={(e) =>
+                              handleUpdateInlineDraft("dr_shipments", d._draftId, {
+                                partner_id: e.target.value,
+                              })
+                            }
+                            className="h-8 w-44 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                          >
+                            <option value="">-- Pilih Partner --</option>
+                            {partnersCol.map((p) => (
+                              <option key={p.doc_id} value={p.doc_id}>
+                                {p.doc_id} · {p.partner_name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="py-2 px-3">
+                          <input
+                            type="text"
+                            list="inline-lots-list"
+                            value={d.lot_no}
+                            onChange={(e) =>
+                              handleUpdateInlineDraft("dr_shipments", d._draftId, {
+                                lot_no: e.target.value,
+                              })
+                            }
+                            placeholder="Nomor Lot*"
+                            className="h-8 w-32 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-bold uppercase outline-none"
+                          />
+                        </td>
+                        <td className="py-2 px-3">
+                          <input
+                            type="text"
+                            value={d.exp_date}
+                            onChange={(e) =>
+                              handleUpdateInlineDraft("dr_shipments", d._draftId, {
+                                exp_date: e.target.value,
+                              })
+                            }
+                            placeholder="YYYY-MM-DD"
+                            className="h-8 w-28 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                          />
+                        </td>
+                        <td className="py-2 px-3 text-right">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={d.shipped_qty_kg}
+                            onChange={(e) =>
+                              handleUpdateInlineDraft("dr_shipments", d._draftId, {
+                                shipped_qty_kg: e.target.value,
+                              })
+                            }
+                            className="h-8 w-24 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-bold text-right outline-none"
+                          />
+                        </td>
+                        <td className="py-2 px-4 text-right whitespace-nowrap font-sans">
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleDuplicateInlineDraft("dr_shipments", d)}
+                              className="px-2 py-1 rounded bg-white border border-emerald-300 hover:bg-emerald-100 text-emerald-800 text-[10px] font-bold cursor-pointer"
+                            >
+                              Copy
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveInlineDraft("dr_shipments", d._draftId)}
+                              className="px-2 py-1 rounded bg-red-50 hover:bg-red-100 text-red-600 text-[10px] font-bold cursor-pointer"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
                     {filteredDr.map((d) => (
                       <tr key={d.doc_id} className="hover:bg-[#f4f2ff]/30">
                         <td className="py-2.5 px-4 font-bold">{d.doc_id}</td>
@@ -1921,6 +2513,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                         <td className="py-2.5 px-4 text-right tabular-nums font-bold">
                           {d.shipped_qty_kg}
                         </td>
+                        {inlineDrafts.dr_shipments.length > 0 && <td />}
                       </tr>
                     ))}
                   </tbody>
@@ -1938,9 +2531,106 @@ export const TempTab: React.FC<TempTabProps> = ({
                     {renderHeaderCell("lots", "shipping_date", "shipping_date")}
                     {renderHeaderCell("lots", "exp_date", "exp_date")}
                     {renderHeaderCell("lots", "initial_dr_kg", "initial_dr_kg", "right")}
+                    {inlineDrafts.lots.length > 0 && (
+                      <th className="py-2 px-4 text-right align-top font-bold text-[11px] text-[#434655]">
+                        actions
+                      </th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#f1f0fa] text-[#181a2c]">
+                  {inlineDrafts.lots.map((d) => (
+                    <tr key={d._draftId} className="bg-emerald-50/45 border-b border-emerald-200/70">
+                      <td className="py-2 px-3">
+                        <input
+                          type="text"
+                          value={d.lot_no}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("lots", d._draftId, {
+                              lot_no: e.target.value,
+                            })
+                          }
+                          placeholder="Nomor Lot*"
+                          className="h-8 w-36 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-bold uppercase outline-none"
+                        />
+                      </td>
+                      <td className="py-2 px-3">
+                        <select
+                          value={d.hybrid_id}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("lots", d._draftId, {
+                              hybrid_id: e.target.value,
+                            })
+                          }
+                          className="h-8 w-48 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                        >
+                          <option value="">-- Tanpa Hybrid --</option>
+                          {hybridsCol.map((h) => (
+                            <option key={h.doc_id} value={h.doc_id}>
+                              {h.doc_id} · {h.hybrid_name} ({h.crop_type})
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="py-2 px-3">
+                        <input
+                          type="date"
+                          value={d.shipping_date}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("lots", d._draftId, {
+                              shipping_date: e.target.value,
+                            })
+                          }
+                          className="h-8 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                        />
+                      </td>
+                      <td className="py-2 px-3">
+                        <input
+                          type="text"
+                          value={d.exp_date}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("lots", d._draftId, {
+                              exp_date: e.target.value,
+                            })
+                          }
+                          placeholder="YYYY-MM-DD"
+                          className="h-8 w-28 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                        />
+                      </td>
+                      <td className="py-2 px-3 text-right">
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={d.initial_dr_kg}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("lots", d._draftId, {
+                              initial_dr_kg: e.target.value,
+                            })
+                          }
+                          className="h-8 w-24 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-bold text-right outline-none"
+                        />
+                      </td>
+                      <td className="py-2 px-4 text-right whitespace-nowrap font-sans">
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleDuplicateInlineDraft("lots", d)}
+                            className="px-2 py-1 rounded bg-white border border-emerald-300 hover:bg-emerald-100 text-emerald-800 text-[10px] font-bold cursor-pointer"
+                          >
+                            Copy
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveInlineDraft("lots", d._draftId)}
+                            className="px-2 py-1 rounded bg-red-50 hover:bg-red-100 text-red-600 text-[10px] font-bold cursor-pointer"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
                   {filteredLots.map((l) => (
                     <tr key={l.doc_id} className="hover:bg-[#f4f2ff]/30">
                       <td className="py-2.5 px-4 font-bold">{l.doc_id}</td>
@@ -1950,6 +2640,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                       <td className="py-2.5 px-4 text-right tabular-nums font-bold">
                         {l.initial_dr_kg}
                       </td>
+                      {inlineDrafts.lots.length > 0 && <td />}
                     </tr>
                   ))}
                 </tbody>
@@ -1964,9 +2655,66 @@ export const TempTab: React.FC<TempTabProps> = ({
                     {renderHeaderCell("hybrids", "doc_id", "doc_id (PK)")}
                     {renderHeaderCell("hybrids", "hybrid_name", "hybrid_name")}
                     {renderHeaderCell("hybrids", "crop_type", "crop_type")}
+                    {inlineDrafts.hybrids.length > 0 && (
+                      <th className="py-2 px-4 text-right align-top font-bold text-[11px] text-[#434655]">
+                        actions
+                      </th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#f1f0fa] text-[#181a2c]">
+                  {inlineDrafts.hybrids.map((d) => (
+                    <tr key={d._draftId} className="bg-emerald-50/45 border-b border-emerald-200/70">
+                      <td className="py-2 px-4 text-[11px] text-emerald-700 font-semibold italic">
+                        (auto)
+                      </td>
+                      <td className="py-2 px-3">
+                        <input
+                          type="text"
+                          value={d.hybrid_name}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("hybrids", d._draftId, {
+                              hybrid_name: e.target.value.toUpperCase(),
+                            })
+                          }
+                          placeholder="Nama Hybrid (mis. ADV-777)*"
+                          className="h-8 w-56 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-bold uppercase outline-none"
+                        />
+                      </td>
+                      <td className="py-2 px-3">
+                        <select
+                          value={d.crop_type}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("hybrids", d._draftId, {
+                              crop_type: e.target.value,
+                            })
+                          }
+                          className="h-8 w-36 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                        >
+                          <option value="Field Corn">Field Corn</option>
+                          <option value="Vegetables">Vegetables</option>
+                        </select>
+                      </td>
+                      <td className="py-2 px-4 text-right whitespace-nowrap font-sans">
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleDuplicateInlineDraft("hybrids", d)}
+                            className="px-2 py-1 rounded bg-white border border-emerald-300 hover:bg-emerald-100 text-emerald-800 text-[10px] font-bold cursor-pointer"
+                          >
+                            Copy
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveInlineDraft("hybrids", d._draftId)}
+                            className="px-2 py-1 rounded bg-red-50 hover:bg-red-100 text-red-600 text-[10px] font-bold cursor-pointer"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
                   {filteredHybrids.map((h) => (
                     <tr key={h.doc_id} className="hover:bg-[#f4f2ff]/30">
                       <td className="py-2.5 px-4 font-bold">{h.doc_id}</td>
@@ -1974,6 +2722,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                         {h.hybrid_name}
                       </td>
                       <td className="py-2.5 px-4 font-sans text-[#434655]">{h.crop_type}</td>
+                      {inlineDrafts.hybrids.length > 0 && <td />}
                     </tr>
                   ))}
                 </tbody>
@@ -1998,6 +2747,120 @@ export const TempTab: React.FC<TempTabProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#f1f0fa] text-[#181a2c]">
+                  {inlineDrafts.partners.map((d) => (
+                    <tr key={d._draftId} className="bg-emerald-50/45 border-b border-emerald-200/70">
+                      <td className="py-2 px-4 text-[11px] text-emerald-700 font-semibold italic">
+                        (auto)
+                      </td>
+                      <td className="py-2 px-3">
+                        <input
+                          type="text"
+                          value={d.partner_name}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("partners", d._draftId, {
+                              partner_name: e.target.value,
+                            })
+                          }
+                          placeholder="Nama Partner / Kios*"
+                          className="h-8 w-48 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-sans font-semibold outline-none"
+                        />
+                      </td>
+                      <td className="py-2 px-3">
+                        <select
+                          value={d.category}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("partners", d._draftId, {
+                              category: e.target.value,
+                            })
+                          }
+                          className="h-8 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                        >
+                          {(allCategories || ["Distributor", "R1", "R2"]).map((cat) => (
+                            <option key={cat} value={cat}>
+                              {cat}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="py-2 px-3">
+                        <select
+                          value={d.pic_employee_id}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("partners", d._draftId, {
+                              pic_employee_id: e.target.value,
+                            })
+                          }
+                          className="h-8 w-40 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                        >
+                          <option value="">-- Pilih PIC --</option>
+                          {employeesCol.map((emp) => (
+                            <option key={emp.doc_id} value={emp.doc_id}>
+                              {emp.doc_id} · {emp.full_name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="py-2 px-3">
+                        <select
+                          value={d.division_group}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("partners", d._draftId, {
+                              division_group: e.target.value,
+                            })
+                          }
+                          className="h-8 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                        >
+                          <option value="Field Corn">Field Corn</option>
+                          <option value="Vegetables">Vegetables</option>
+                        </select>
+                      </td>
+                      <td className="py-2 px-3">
+                        <input
+                          type="text"
+                          list="inline-prov-list"
+                          value={d.province}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("partners", d._draftId, {
+                              province: e.target.value,
+                            })
+                          }
+                          placeholder="Provinsi"
+                          className="h-8 w-32 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-sans font-semibold outline-none"
+                        />
+                      </td>
+                      <td className="py-2 px-3">
+                        <input
+                          type="text"
+                          value={d.area}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("partners", d._draftId, {
+                              area: e.target.value,
+                            })
+                          }
+                          placeholder="Area"
+                          className="h-8 w-28 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-sans font-semibold outline-none"
+                        />
+                      </td>
+                      <td className="py-2 px-4 text-right whitespace-nowrap font-sans">
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleDuplicateInlineDraft("partners", d)}
+                            className="px-2 py-1 rounded bg-white border border-emerald-300 hover:bg-emerald-100 text-emerald-800 text-[10px] font-bold cursor-pointer"
+                          >
+                            Copy
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveInlineDraft("partners", d._draftId)}
+                            className="px-2 py-1 rounded bg-red-50 hover:bg-red-100 text-red-600 text-[10px] font-bold cursor-pointer"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
                   {filteredPartners.map((p) => (
                     <tr key={p.doc_id} className="hover:bg-[#f4f2ff]/30">
                       <td className="py-2.5 px-4 font-bold">{p.doc_id}</td>
@@ -2059,6 +2922,152 @@ export const TempTab: React.FC<TempTabProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#f1f0fa] text-[#181a2c]">
+                  {inlineDrafts.employees.map((d) => (
+                    <tr key={d._draftId} className="bg-emerald-50/45 border-b border-emerald-200/70">
+                      <td className="py-2 px-4 text-[11px] text-emerald-700 font-semibold italic">
+                        (auto)
+                      </td>
+                      <td className="py-2 px-2">
+                        <input
+                          type="text"
+                          value={d.username}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("employees", d._draftId, {
+                              username: e.target.value.toLowerCase(),
+                            })
+                          }
+                          placeholder="username"
+                          className="h-8 w-28 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                        />
+                      </td>
+                      <td className="py-2 px-2">
+                        <input
+                          type="text"
+                          value={d.password}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("employees", d._draftId, {
+                              password: e.target.value,
+                            })
+                          }
+                          placeholder="123"
+                          className="h-8 w-20 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                        />
+                      </td>
+                      <td className="py-2 px-2">
+                        <input
+                          type="text"
+                          value={d.full_name}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("employees", d._draftId, {
+                              full_name: e.target.value,
+                            })
+                          }
+                          placeholder="Nama Lengkap*"
+                          className="h-8 w-40 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-sans font-semibold outline-none"
+                        />
+                      </td>
+                      <td className="py-2 px-2">
+                        <select
+                          value={d.position}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("employees", d._draftId, {
+                              position: e.target.value,
+                            })
+                          }
+                          className="h-8 w-40 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-sans font-semibold outline-none"
+                        >
+                          <option value="Business Analyst">Business Analyst</option>
+                          <option value="Commercial Lead">Commercial Lead</option>
+                          <option value="Vegetables Sales Manager">Vegetables Sales Manager</option>
+                          <option value="Area Sales Manager">Area Sales Manager</option>
+                          <option value="Sales Agronomist">Sales Agronomist</option>
+                          <option value="Business Solution">Business Solution</option>
+                        </select>
+                      </td>
+                      <td className="py-2 px-2 text-center font-bold text-emerald-800">
+                        Lv.{d.role_level}
+                      </td>
+                      <td className="py-2 px-2">
+                        <select
+                          value={d.upline_id}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("employees", d._draftId, {
+                              upline_id: e.target.value,
+                            })
+                          }
+                          className="h-8 w-36 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                        >
+                          <option value="">-- Tanpa Upline --</option>
+                          {employeesCol.map((emp) => (
+                            <option key={emp.doc_id} value={emp.doc_id}>
+                              {emp.doc_id} · {emp.full_name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="py-2 px-2 text-[11px] text-[#8E94B7] italic">(auto)</td>
+                      <td className="py-2 px-2">
+                        <select
+                          value={d.division_group}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("employees", d._draftId, {
+                              division_group: e.target.value,
+                            })
+                          }
+                          className="h-8 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                        >
+                          <option value="Field Corn">Field Corn</option>
+                          <option value="Vegetables">Vegetables</option>
+                          <option value="All">All</option>
+                        </select>
+                      </td>
+                      <td className="py-2 px-2">
+                        <input
+                          type="text"
+                          list="inline-prov-list"
+                          value={d.province}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("employees", d._draftId, {
+                              province: e.target.value,
+                            })
+                          }
+                          placeholder="Provinsi"
+                          className="h-8 w-28 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-sans font-semibold outline-none"
+                        />
+                      </td>
+                      <td className="py-2 px-2">
+                        <input
+                          type="text"
+                          value={d.area}
+                          onChange={(e) =>
+                            handleUpdateInlineDraft("employees", d._draftId, {
+                              area: e.target.value,
+                            })
+                          }
+                          placeholder="Area"
+                          className="h-8 w-24 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-sans font-semibold outline-none"
+                        />
+                      </td>
+                      <td className="py-2 px-4 text-right whitespace-nowrap font-sans">
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleDuplicateInlineDraft("employees", d)}
+                            className="px-2 py-1 rounded bg-white border border-emerald-300 hover:bg-emerald-100 text-emerald-800 text-[10px] font-bold cursor-pointer"
+                          >
+                            Copy
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveInlineDraft("employees", d._draftId)}
+                            className="px-2 py-1 rounded bg-red-50 hover:bg-red-100 text-red-600 text-[10px] font-bold cursor-pointer"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
                   {filteredEmployees.map((e) => (
                     <tr key={e.doc_id} className="hover:bg-[#f4f2ff]/30">
                       <td className="py-2.5 px-4 font-bold">{e.doc_id}</td>
@@ -2185,24 +3194,6 @@ export const TempTab: React.FC<TempTabProps> = ({
           itemName={employeeDeleteModal.item?.name}
         />
       )}
-      <DatabaseAddModal
-        isOpen={isDbAddModalOpen}
-        onClose={() => setIsDbAddModalOpen(false)}
-        initialCollection={
-          (["opname_logs", "dr_shipments", "lots", "hybrids"].includes(activeCollection)
-            ? activeCollection
-            : "opname_logs") as OperationalCollectionKey
-        }
-        activeDivision={effectiveDivision}
-        partnersCol={partnersCol}
-        employeesCol={employeesCol}
-        hybridsCol={hybridsCol}
-        lotsCol={lotsCol}
-        onSuccess={(msg, targetCol) => {
-          setActiveCollection(targetCol);
-          showToast(msg);
-        }}
-      />
     </div>
   );
 };

@@ -1322,3 +1322,431 @@ export async function ensureSuperUserAdityaFirestore(
   );
   return true;
 }
+
+/**
+ * Bulk add multiple Hybrid rows into Firestore /hybrids.
+ */
+export async function bulkAddHybridsFirestore(
+  user: User | null | undefined,
+  rows: Array<{ hybrid_name: string; crop_type: "Field Corn" | "Vegetables" }>,
+  existingHybrids: HybridFsDoc[],
+): Promise<number> {
+  const ownerUid = user?.uid || "public";
+  const existingIds = new Set(existingHybrids.map((h) => toValidDocId(h.doc_id)));
+  const existingByName = new Map(
+    existingHybrids.map((h) => [cleanForMatch(h.hybrid_name), h]),
+  );
+
+  let nextNum = existingHybrids.length + 1;
+  const ops: any[] = [];
+
+  for (const r of rows) {
+    const cleanName = clampStr(String(r.hybrid_name || "").toUpperCase(), 100);
+    if (!cleanName) continue;
+    const key = cleanForMatch(cleanName);
+    if (existingByName.has(key)) continue;
+
+    let docId = `HYB-${String(nextNum++).padStart(3, "0")}`;
+    while (existingIds.has(docId)) {
+      docId = `HYB-${String(nextNum++).padStart(3, "0")}`;
+    }
+    existingIds.add(docId);
+    const crop = toStrictDivision(r.crop_type);
+    existingByName.set(key, { doc_id: docId, hybrid_name: cleanName, crop_type: crop });
+    ops.push({
+      type: "create" as const,
+      colName: "hybrids",
+      docId,
+      data: {
+        doc_id: docId,
+        hybrid_name: cleanName,
+        crop_type: crop,
+        ownerUid,
+      },
+    });
+  }
+
+  if (ops.length === 0) throw new Error("Isi minimal 1 nama hybrid yang belum ada.");
+  await commitInChunks(ops, 15);
+  return ops.length;
+}
+
+/**
+ * Bulk add or update multiple Lot rows into Firestore /lots.
+ */
+export async function bulkAddLotsFirestore(
+  user: User | null | undefined,
+  rows: Array<{
+    lot_no: string;
+    hybrid_id: string | null;
+    shipping_date: string;
+    exp_date: string;
+    initial_dr_kg: number;
+  }>,
+  existingLots: LotFsDoc[],
+): Promise<number> {
+  const ownerUid = user?.uid || "public";
+  const existingLotIds = new Set(existingLots.map((l) => toValidDocId(l.doc_id)));
+  const opsMap = new Map<string, any>();
+
+  for (const r of rows) {
+    const lotNo = toValidDocId(String(r.lot_no || "").toUpperCase(), "");
+    if (!lotNo) continue;
+    const numDr = Number(r.initial_dr_kg);
+    const isUpdate = existingLotIds.has(lotNo);
+    opsMap.set(lotNo, {
+      type: (isUpdate ? "update" : "create") as "create" | "update",
+      colName: "lots",
+      docId: lotNo,
+      data: {
+        doc_id: lotNo,
+        hybrid_id: r.hybrid_id ? toValidDocId(r.hybrid_id) : null,
+        shipping_date: clampStr(toIsoDateStr(r.shipping_date), 20),
+        exp_date: clampStr(toIsoDateStr(r.exp_date || extractExpFromLot(lotNo)), 20),
+        initial_dr_kg: Number.isFinite(numDr) && numDr >= 0 ? numDr : 0,
+        ownerUid,
+      },
+    });
+  }
+
+  const ops = Array.from(opsMap.values());
+  if (ops.length === 0) throw new Error("Isi minimal 1 nomor Lot yang valid.");
+  await commitInChunks(ops, 15);
+  return ops.length;
+}
+
+/**
+ * Bulk add multiple DR Shipment rows into Firestore /dr_shipments.
+ * Stage 1 ensures all referenced /lots/{lot_no} exist/updated, Stage 2 writes DR rows.
+ */
+export async function bulkAddDrShipmentsFirestore(
+  user: User | null | undefined,
+  rows: Array<{
+    shipping_date: string;
+    partner_id: string | null;
+    lot_no: string;
+    exp_date: string;
+    shipped_qty_kg: number;
+  }>,
+  existingLots: LotFsDoc[],
+  existingDrShipments: DrShipmentFsDoc[],
+): Promise<number> {
+  const ownerUid = user?.uid || "public";
+  const existingLotMap = new Map(existingLots.map((l) => [toValidDocId(l.doc_id), l]));
+  const existingDrIds = new Set(existingDrShipments.map((d) => toValidDocId(d.doc_id)));
+  let nextDrNum = existingDrShipments.length + 1;
+
+  const lotDelta = new Map<
+    string,
+    { exists: boolean; baseKg: number; addKg: number; shippingDate: string; expDate: string; hybridId: string | null }
+  >();
+  const drOps: any[] = [];
+
+  for (const r of rows) {
+    const lotNo = toValidDocId(String(r.lot_no || "").toUpperCase(), "");
+    if (!lotNo) continue;
+
+    const shippingDate = clampStr(
+      toIsoDateStr(r.shipping_date) || new Date().toISOString().slice(0, 10),
+      20,
+      "2026-01-01",
+    );
+    const expDate = clampStr(toIsoDateStr(r.exp_date || extractExpFromLot(lotNo)), 20);
+    const numQty = Number(r.shipped_qty_kg);
+    const qtyKg = Number.isFinite(numQty) && numQty >= 0 ? numQty : 0;
+
+    const existingLot = existingLotMap.get(lotNo);
+    const prevPending = lotDelta.get(lotNo);
+    if (prevPending) {
+      prevPending.addKg += qtyKg;
+    } else {
+      lotDelta.set(lotNo, {
+        exists: Boolean(existingLot),
+        baseKg: existingLot?.initial_dr_kg || 0,
+        addKg: qtyKg,
+        shippingDate: existingLot?.shipping_date || shippingDate,
+        expDate: existingLot?.exp_date || expDate,
+        hybridId: existingLot?.hybrid_id || null,
+      });
+    }
+
+    let drId = `DR-${String(nextDrNum++).padStart(4, "0")}`;
+    while (existingDrIds.has(drId)) {
+      drId = `DR-${String(nextDrNum++).padStart(4, "0")}`;
+    }
+    existingDrIds.add(drId);
+
+    drOps.push({
+      type: "create" as const,
+      colName: "dr_shipments",
+      docId: drId,
+      data: {
+        doc_id: drId,
+        shipping_date: shippingDate,
+        partner_id: r.partner_id ? toValidDocId(r.partner_id) : null,
+        lot_no: lotNo,
+        exp_date: expDate,
+        shipped_qty_kg: qtyKg,
+        ownerUid,
+      },
+    });
+  }
+
+  if (drOps.length === 0) throw new Error("Isi minimal 1 baris DR Shipment dengan Nomor Lot.");
+
+  const lotOps = Array.from(lotDelta.entries()).map(([lotNo, info]) => ({
+    type: (info.exists ? "update" : "create") as "create" | "update",
+    colName: "lots",
+    docId: lotNo,
+    data: {
+      doc_id: lotNo,
+      hybrid_id: info.hybridId,
+      shipping_date: info.shippingDate,
+      exp_date: info.expDate,
+      initial_dr_kg: info.baseKg + info.addKg,
+      ownerUid,
+    },
+  }));
+
+  if (lotOps.length > 0) await commitInChunks(lotOps, 15);
+  await commitInChunks(drOps, 10);
+  return drOps.length;
+}
+
+/**
+ * Bulk add or update multiple Opname Log rows (supports multiple monthly columns per row) in Firestore.
+ */
+export async function bulkAddOpnameLogsFirestore(
+  user: User | null | undefined,
+  rows: Array<{
+    partner_id: string | null;
+    lot_no: string;
+    checker_id: string | null;
+    crop_year: string;
+    months: Partial<Record<(typeof FISCAL_MONTH_COLS)[number]["key"], MonthlyOpnameCell | null>>;
+  }>,
+  existingLots: LotFsDoc[],
+  existingLogs: OpnameLogFsDoc[],
+): Promise<number> {
+  const ownerUid = user?.uid || "public";
+  const existingLotIds = new Set(existingLots.map((l) => toValidDocId(l.doc_id)));
+  const existingLogsMap = new Map(existingLogs.map((l) => [toValidDocId(l.doc_id), l]));
+
+  const newLotOpsMap = new Map<string, any>();
+  const logOpsMap = new Map<string, any>();
+
+  for (const r of rows) {
+    const lotNo = toValidDocId(String(r.lot_no || "").toUpperCase(), "");
+    if (!lotNo) continue;
+
+    if (!existingLotIds.has(lotNo) && !newLotOpsMap.has(lotNo)) {
+      newLotOpsMap.set(lotNo, {
+        type: "create" as const,
+        colName: "lots",
+        docId: lotNo,
+        data: {
+          doc_id: lotNo,
+          hybrid_id: null,
+          shipping_date: "",
+          exp_date: clampStr(toIsoDateStr(extractExpFromLot(lotNo)), 20),
+          initial_dr_kg: 0,
+          ownerUid,
+        },
+      });
+    }
+
+    const partnerId = r.partner_id ? toValidDocId(r.partner_id) : null;
+    const checkerId = r.checker_id ? toValidDocId(r.checker_id) : null;
+    const cropYear = clampStr(r.crop_year || "FY2026", 12, "FY2026");
+    const logId = toValidDocId(`${partnerId || "NO_PRT"}_${lotNo}_${cropYear}`);
+    const existingLog = existingLogsMap.get(logId);
+
+    if (existingLog) {
+      const updateData: Record<string, any> = {
+        partner_id: partnerId,
+        lot_no: lotNo,
+        checker_id: checkerId ?? existingLog.checker_id ?? null,
+        crop_year: cropYear,
+      };
+      FISCAL_MONTH_COLS.forEach(({ key }) => {
+        const cell = r.months[key];
+        if (cell) {
+          updateData[key] = {
+            in: Math.max(0, Number(cell.in) || 0),
+            idle: Math.max(0, Number(cell.idle) || 0),
+            pog: Math.max(0, Number(cell.pog) || 0),
+          };
+        }
+      });
+      logOpsMap.set(logId, {
+        type: "update" as const,
+        colName: "opname_logs",
+        docId: logId,
+        data: updateData,
+      });
+    } else {
+      const createData: Record<string, any> = {
+        doc_id: logId,
+        partner_id: partnerId,
+        lot_no: lotNo,
+        checker_id: checkerId,
+        crop_year: cropYear,
+        ownerUid,
+      };
+      FISCAL_MONTH_COLS.forEach(({ key }) => {
+        const cell = r.months[key];
+        createData[key] = cell
+          ? {
+              in: Math.max(0, Number(cell.in) || 0),
+              idle: Math.max(0, Number(cell.idle) || 0),
+              pog: Math.max(0, Number(cell.pog) || 0),
+            }
+          : null;
+      });
+      logOpsMap.set(logId, {
+        type: "create" as const,
+        colName: "opname_logs",
+        docId: logId,
+        data: createData,
+      });
+    }
+  }
+
+  const lotOps = Array.from(newLotOpsMap.values());
+  const logOps = Array.from(logOpsMap.values());
+  if (logOps.length === 0) throw new Error("Isi minimal 1 baris Opname Log dengan Nomor Lot.");
+
+  if (lotOps.length > 0) await commitInChunks(lotOps, 15);
+  await commitInChunks(logOps, 8);
+  return logOps.length;
+}
+
+/**
+ * Bulk add multiple Partner rows directly into Firestore /partners.
+ */
+export async function bulkAddPartnersFirestore(
+  user: User | null | undefined,
+  rows: Array<{
+    partner_name: string;
+    category: string;
+    pic_employee_id: string | null;
+    division_group: "Field Corn" | "Vegetables";
+    province: string;
+    area: string;
+  }>,
+  existingPartners: PartnerFsDoc[],
+  existingEmployees: EmployeeFsDoc[],
+): Promise<number> {
+  const ownerUid = user?.uid || "public";
+  const existingIds = new Set(existingPartners.map((p) => toValidDocId(p.doc_id)));
+  const empById = new Map(existingEmployees.map((e) => [toValidDocId(e.doc_id), e]));
+  let nextNum = existingPartners.length + 1;
+  const ops: any[] = [];
+
+  for (const r of rows) {
+    const partnerName = clampStr(r.partner_name, 160);
+    if (!partnerName) continue;
+
+    let docId = `PRT-${String(nextNum++).padStart(3, "0")}`;
+    while (existingIds.has(docId)) {
+      docId = `PRT-${String(nextNum++).padStart(3, "0")}`;
+    }
+    existingIds.add(docId);
+
+    const picId = r.pic_employee_id ? toValidDocId(r.pic_employee_id) : null;
+    const picEmp = picId ? empById.get(picId) : undefined;
+    ops.push({
+      type: "create" as const,
+      colName: "partners",
+      docId,
+      data: {
+        doc_id: docId,
+        partner_name: partnerName,
+        category: clampStr(r.category || "R1", 40),
+        pic_employee_id: picId,
+        pic_name: clampStr(picEmp?.full_name || "", 120),
+        division_group: toStrictDivision(r.division_group),
+        province: clampStr(r.province, 80, "-"),
+        area: clampStr(r.area || r.province, 80, "-"),
+        ownerUid,
+      },
+    });
+  }
+
+  if (ops.length === 0) throw new Error("Isi minimal 1 Nama Partner.");
+  await commitInChunks(ops, 15);
+  return ops.length;
+}
+
+/**
+ * Bulk add multiple Employee rows directly into Firestore /employees.
+ */
+export async function bulkAddEmployeesFirestore(
+  user: User | null | undefined,
+  rows: Array<{
+    username: string;
+    full_name: string;
+    position: string;
+    role_level: number;
+    upline_id: string | null;
+    division_group: "Field Corn" | "Vegetables" | "All";
+    province: string;
+    area: string;
+    password?: string;
+  }>,
+  existingEmployees: EmployeeFsDoc[],
+): Promise<Array<{ doc_id: string; username: string; password: string }>> {
+  const ownerUid = user?.uid || "public";
+  const existingIds = new Set(existingEmployees.map((e) => toValidDocId(e.doc_id)));
+  let nextNum = existingEmployees.length + 1;
+  const ops: any[] = [];
+  const createdCreds: Array<{ doc_id: string; username: string; password: string }> = [];
+
+  for (const r of rows) {
+    const fullName = clampStr(r.full_name, 120);
+    if (!fullName) continue;
+
+    let docId = `EMP-${String(nextNum++).padStart(3, "0")}`;
+    while (existingIds.has(docId)) {
+      docId = `EMP-${String(nextNum++).padStart(3, "0")}`;
+    }
+    existingIds.add(docId);
+
+    const username = clampStr(
+      (r.username || fullName.replace(/\s+/g, "").toLowerCase()).toLowerCase(),
+      80,
+    );
+    const divGroup = r.division_group === "All" ? "All" : toStrictDivision(r.division_group);
+    const roleLevel = Math.min(5, Math.max(1, Math.round(Number(r.role_level) || 1)));
+
+    ops.push({
+      type: "create" as const,
+      colName: "employees",
+      docId,
+      data: {
+        doc_id: docId,
+        username,
+        full_name: fullName,
+        position: clampStr(r.position || "Business Solution", 100, "Business Solution"),
+        role_level: roleLevel,
+        upline_id: r.upline_id ? toValidDocId(r.upline_id) : null,
+        subordinate_ids: [],
+        access_scope_ids: [docId],
+        division_group: divGroup,
+        province: clampStr(r.province, 80, "-"),
+        area: clampStr(r.area || r.province, 80, "-"),
+        status: "Aktif",
+        ownerUid,
+      },
+    });
+    createdCreds.push({
+      doc_id: docId,
+      username,
+      password: String(r.password || "123"),
+    });
+  }
+
+  if (ops.length === 0) throw new Error("Isi minimal 1 Nama Lengkap Employee.");
+  await commitInChunks(ops, 15);
+  return createdCreds;
+}
