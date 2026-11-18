@@ -1,0 +1,210 @@
+{
+  "entities": {
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Authorized system administrator registry document.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "minLength": 3, "maxLength": 120 },
+        "role": { "type": "string", "enum": ["admin"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role", "createdAt", "updatedAt"]
+    },
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "PII-isolated authenticated user profile and employee link.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "minLength": 3, "maxLength": 120 },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "employeeId": { "type": "string", "maxLength": 128 },
+        "divisionGroup": { "type": "string", "enum": ["Field Corn", "Vegetables", "All"] },
+        "roleLevel": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "roleLevel", "createdAt", "updatedAt"]
+    },
+    "AccessRule": {
+      "title": "AccessRule",
+      "description": "Role-based tab visibility matrix per organizational position.",
+      "type": "object",
+      "properties": {
+        "doc_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "position": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "home": { "type": "boolean" },
+        "partner": { "type": "boolean" },
+        "stock": { "type": "boolean" },
+        "pog": { "type": "boolean" },
+        "overview": { "type": "boolean" },
+        "temp": { "type": "boolean" },
+        "access": { "type": "boolean" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["doc_id", "position", "home", "partner", "stock", "pog", "overview", "temp", "access", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "Employee": {
+      "title": "Employee",
+      "description": "Normalized sales and analyst employee master record with hierarchy links.",
+      "type": "object",
+      "properties": {
+        "doc_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "username": { "type": "string", "maxLength": 80 },
+        "full_name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "position": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "role_level": { "type": "integer" },
+        "upline_id": { "type": "string", "maxLength": 128 },
+        "subordinate_ids": { "type": "array" },
+        "access_scope_ids": { "type": "array" },
+        "division_group": { "type": "string", "enum": ["Field Corn", "Vegetables", "All"] },
+        "province": { "type": "string", "maxLength": 80 },
+        "area": { "type": "string", "maxLength": 80 },
+        "status": { "type": "string", "enum": ["Aktif", "Nonaktif"] },
+        "picEmail": { "type": "string", "maxLength": 120 },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["doc_id", "username", "full_name", "position", "role_level", "subordinate_ids", "access_scope_ids", "division_group", "province", "area", "status", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "Partner": {
+      "title": "Partner",
+      "description": "Distributor, R1, or R2 partner record assigned to a PIC employee.",
+      "type": "object",
+      "properties": {
+        "doc_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "partner_name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "category": { "type": "string", "maxLength": 40 },
+        "pic_employee_id": { "type": "string", "maxLength": 128 },
+        "pic_name": { "type": "string", "maxLength": 120 },
+        "division_group": { "type": "string", "enum": ["Field Corn", "Vegetables"] },
+        "province": { "type": "string", "maxLength": 80 },
+        "area": { "type": "string", "maxLength": 80 },
+        "picEmail": { "type": "string", "maxLength": 120 },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["doc_id", "partner_name", "category", "division_group", "province", "area", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "Hybrid": {
+      "title": "Hybrid",
+      "description": "Seed hybrid variety catalog separated into Field Corn and Vegetables.",
+      "type": "object",
+      "properties": {
+        "doc_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "hybrid_name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "crop_type": { "type": "string", "enum": ["Field Corn", "Vegetables"] },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["doc_id", "hybrid_name", "crop_type", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "Lot": {
+      "title": "Lot",
+      "description": "Seed batch/lot master keyed by lot_no referencing hybrid_id.",
+      "type": "object",
+      "properties": {
+        "doc_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "hybrid_id": { "type": "string", "maxLength": 128 },
+        "shipping_date": { "type": "string", "maxLength": 20 },
+        "exp_date": { "type": "string", "maxLength": 20 },
+        "initial_dr_kg": { "type": "number" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["doc_id", "shipping_date", "exp_date", "initial_dr_kg", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "DrShipment": {
+      "title": "DrShipment",
+      "description": "Delivery receipt shipment log referencing partner_id and lot_no.",
+      "type": "object",
+      "properties": {
+        "doc_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "shipping_date": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "partner_id": { "type": "string", "maxLength": 128 },
+        "lot_no": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "exp_date": { "type": "string", "maxLength": 20 },
+        "shipped_qty_kg": { "type": "number" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["doc_id", "shipping_date", "lot_no", "exp_date", "shipped_qty_kg", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "OpnameLog": {
+      "title": "OpnameLog",
+      "description": "Monthly fiscal-year opname ledger (Apr-Mar) storing {in, idle, pog} per month.",
+      "type": "object",
+      "properties": {
+        "doc_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "partner_id": { "type": "string", "maxLength": 128 },
+        "lot_no": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "checker_id": { "type": "string", "maxLength": 128 },
+        "crop_year": { "type": "string", "minLength": 4, "maxLength": 12 },
+        "apr": { "type": "object" },
+        "mei": { "type": "object" },
+        "jun": { "type": "object" },
+        "jul": { "type": "object" },
+        "ags": { "type": "object" },
+        "sep": { "type": "object" },
+        "okt": { "type": "object" },
+        "nov": { "type": "object" },
+        "des": { "type": "object" },
+        "jan": { "type": "object" },
+        "feb": { "type": "object" },
+        "mar": { "type": "object" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["doc_id", "lot_no", "crop_year", "ownerUid", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Authorized admin UID lookup documents."
+    },
+    "/users/{uid}": {
+      "schema": { "$ref": "#/entities/UserAccount" },
+      "description": "PII-isolated authenticated user profile documents."
+    },
+    "/access_rules/{roleId}": {
+      "schema": { "$ref": "#/entities/AccessRule" },
+      "description": "Role-based UI tab permissions matrix."
+    },
+    "/employees/{empId}": {
+      "schema": { "$ref": "#/entities/Employee" },
+      "description": "Normalized employee hierarchy records."
+    },
+    "/partners/{partnerId}": {
+      "schema": { "$ref": "#/entities/Partner" },
+      "description": "Normalized partner/kiosk/distributor records."
+    },
+    "/hybrids/{hybridId}": {
+      "schema": { "$ref": "#/entities/Hybrid" },
+      "description": "Normalized seed hybrid variety catalog."
+    },
+    "/lots/{lotNo}": {
+      "schema": { "$ref": "#/entities/Lot" },
+      "description": "Normalized seed lot master records."
+    },
+    "/dr_shipments/{drId}": {
+      "schema": { "$ref": "#/entities/DrShipment" },
+      "description": "Delivery receipt shipment records."
+    },
+    "/opname_logs/{logId}": {
+      "schema": { "$ref": "#/entities/OpnameLog" },
+      "description": "Fiscal year Apr-Mar opname ledger per partner and lot."
+    }
+  }
+}

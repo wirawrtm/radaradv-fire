@@ -1,0 +1,464 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net (Default-Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // PRIMITIVES & SECURITY HELPERS (EXCLUSIVE SOLE ACCOUNT ACCESS)
+    // =========================================================================
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'villatama11@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin();
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isStr(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isOptStr(val, maxLen) {
+      return val == null || (val is string && val.size() <= maxLen);
+    }
+
+    function isOptId(val) {
+      return val == null || isValidId(val);
+    }
+
+    function isValidDivision(val) {
+      return val is string && val in ['Field Corn', 'Vegetables'];
+    }
+
+    function isValidDivisionOrAll(val) {
+      return val is string && val in ['Field Corn', 'Vegetables', 'All'];
+    }
+
+    function isValidMonthCell(cell) {
+      return cell == null || (
+        cell is map &&
+        cell.keys().hasAll(['in', 'idle', 'pog']) &&
+        cell.keys().hasOnly(['in', 'idle', 'pog']) &&
+        (cell['in'] is int || cell['in'] is float) && cell['in'] >= 0 &&
+        (cell['idle'] is int || cell['idle'] is float) && cell['idle'] >= 0 &&
+        (cell['pog'] is int || cell['pog'] is float) && cell['pog'] >= 0
+      );
+    }
+
+    function isValidStringList(arr, maxItems) {
+      return arr is list && arr.size() <= maxItems && (arr.size() == 0 || arr[0] is string);
+    }
+
+    // =========================================================================
+    // VALIDATION BLUEPRINTS (SYNCHRONIZED WITH firebase-blueprint.json)
+    // =========================================================================
+    function isValidAdminUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'role', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        isStr(data.email, 3, 120) &&
+        data.role == 'admin' &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUserAccount(data) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'roleLevel', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'displayName', 'employeeId', 'divisionGroup', 'roleLevel', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        isStr(data.email, 3, 120) &&
+        isStr(data.displayName, 1, 120) &&
+        (!('employeeId' in data) || isOptStr(data.employeeId, 128)) &&
+        (!('divisionGroup' in data) || isValidDivisionOrAll(data.divisionGroup)) &&
+        data.roleLevel is int && data.roleLevel >= 1 && data.roleLevel <= 5 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAccessRule(data) {
+      return data.keys().hasAll(['doc_id', 'position', 'home', 'partner', 'stock', 'pog', 'overview', 'temp', 'access', 'ownerUid', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['doc_id', 'position', 'home', 'partner', 'stock', 'pog', 'overview', 'temp', 'access', 'ownerUid', 'createdAt', 'updatedAt']) &&
+        isValidId(data.doc_id) &&
+        isStr(data.position, 1, 100) &&
+        data.home is bool &&
+        data.partner is bool &&
+        data.stock is bool &&
+        data.pog is bool &&
+        data.overview is bool &&
+        data.temp is bool &&
+        data.access is bool &&
+        isValidId(data.ownerUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidEmployee(data) {
+      return data.keys().hasAll([
+          'doc_id', 'username', 'full_name', 'position', 'role_level',
+          'subordinate_ids', 'access_scope_ids', 'division_group',
+          'province', 'area', 'status', 'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'doc_id', 'username', 'full_name', 'position', 'role_level',
+          'upline_id', 'subordinate_ids', 'access_scope_ids', 'division_group',
+          'province', 'area', 'status', 'picEmail', 'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.doc_id) &&
+        isStr(data.username, 0, 80) &&
+        isStr(data.full_name, 1, 120) &&
+        isStr(data.position, 1, 100) &&
+        data.role_level is int && data.role_level >= 1 && data.role_level <= 5 &&
+        (!('upline_id' in data) || isOptId(data.upline_id)) &&
+        isValidStringList(data.subordinate_ids, 200) &&
+        isValidStringList(data.access_scope_ids, 200) &&
+        isValidDivisionOrAll(data.division_group) &&
+        isStr(data.province, 0, 80) &&
+        isStr(data.area, 0, 80) &&
+        data.status in ['Aktif', 'Nonaktif'] &&
+        (!('picEmail' in data) || isOptStr(data.picEmail, 120)) &&
+        isValidId(data.ownerUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidPartner(data) {
+      return data.keys().hasAll([
+          'doc_id', 'partner_name', 'category', 'division_group',
+          'province', 'area', 'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'doc_id', 'partner_name', 'category', 'pic_employee_id', 'pic_name',
+          'division_group', 'province', 'area', 'picEmail', 'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.doc_id) &&
+        isStr(data.partner_name, 1, 160) &&
+        isStr(data.category, 0, 40) &&
+        (!('pic_employee_id' in data) || isOptId(data.pic_employee_id)) &&
+        (!('pic_name' in data) || isOptStr(data.pic_name, 120)) &&
+        isValidDivision(data.division_group) &&
+        isStr(data.province, 0, 80) &&
+        isStr(data.area, 0, 80) &&
+        (!('picEmail' in data) || isOptStr(data.picEmail, 120)) &&
+        isValidId(data.ownerUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidHybrid(data) {
+      return data.keys().hasAll(['doc_id', 'hybrid_name', 'crop_type', 'ownerUid', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['doc_id', 'hybrid_name', 'crop_type', 'ownerUid', 'createdAt', 'updatedAt']) &&
+        isValidId(data.doc_id) &&
+        isStr(data.hybrid_name, 1, 100) &&
+        isValidDivision(data.crop_type) &&
+        isValidId(data.ownerUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidLot(data) {
+      return data.keys().hasAll(['doc_id', 'shipping_date', 'exp_date', 'initial_dr_kg', 'ownerUid', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['doc_id', 'hybrid_id', 'shipping_date', 'exp_date', 'initial_dr_kg', 'ownerUid', 'createdAt', 'updatedAt']) &&
+        isValidId(data.doc_id) &&
+        (!('hybrid_id' in data) || isOptId(data.hybrid_id)) &&
+        isStr(data.shipping_date, 0, 20) &&
+        isStr(data.exp_date, 0, 20) &&
+        (data.initial_dr_kg is int || data.initial_dr_kg is float) && data.initial_dr_kg >= 0 &&
+        isValidId(data.ownerUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidDrShipment(data) {
+      return data.keys().hasAll(['doc_id', 'shipping_date', 'lot_no', 'exp_date', 'shipped_qty_kg', 'ownerUid', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['doc_id', 'shipping_date', 'partner_id', 'lot_no', 'exp_date', 'shipped_qty_kg', 'ownerUid', 'createdAt', 'updatedAt']) &&
+        isValidId(data.doc_id) &&
+        isStr(data.shipping_date, 1, 20) &&
+        (!('partner_id' in data) || isOptId(data.partner_id)) &&
+        isValidId(data.lot_no) &&
+        isStr(data.exp_date, 0, 20) &&
+        (data.shipped_qty_kg is int || data.shipped_qty_kg is float) && data.shipped_qty_kg >= 0 &&
+        isValidId(data.ownerUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidOpnameLog(data) {
+      return data.keys().hasAll(['doc_id', 'lot_no', 'crop_year', 'ownerUid', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'doc_id', 'partner_id', 'lot_no', 'checker_id', 'crop_year',
+          'apr', 'mei', 'jun', 'jul', 'ags', 'sep', 'okt', 'nov', 'des', 'jan', 'feb', 'mar',
+          'ownerUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.doc_id) &&
+        (!('partner_id' in data) || isOptId(data.partner_id)) &&
+        isValidId(data.lot_no) &&
+        (!('checker_id' in data) || isOptId(data.checker_id)) &&
+        isStr(data.crop_year, 4, 12) &&
+        (!('apr' in data) || isValidMonthCell(data.apr)) &&
+        (!('mei' in data) || isValidMonthCell(data.mei)) &&
+        (!('jun' in data) || isValidMonthCell(data.jun)) &&
+        (!('jul' in data) || isValidMonthCell(data.jul)) &&
+        (!('ags' in data) || isValidMonthCell(data.ags)) &&
+        (!('sep' in data) || isValidMonthCell(data.sep)) &&
+        (!('okt' in data) || isValidMonthCell(data.okt)) &&
+        (!('nov' in data) || isValidMonthCell(data.nov)) &&
+        (!('des' in data) || isValidMonthCell(data.des)) &&
+        (!('jan' in data) || isValidMonthCell(data.jan)) &&
+        (!('feb' in data) || isValidMonthCell(data.feb)) &&
+        (!('mar' in data) || isValidMonthCell(data.mar)) &&
+        isValidId(data.ownerUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // =========================================================================
+    // COLLECTION MATCH BLOCKS (SOLE ACCESS: villatama11@gmail.com)
+    // =========================================================================
+
+    match /admins/{uid} {
+      allow get: if isValidId(uid) && isAdmin();
+      allow list: if isBootstrappedAdmin();
+      allow create: if isValidId(uid) &&
+        isBootstrappedAdmin() &&
+        isValidAdminUser(incoming()) &&
+        incoming().uid == uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(uid) &&
+        isBootstrappedAdmin() &&
+        isValidAdminUser(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['email', 'role', 'updatedAt']);
+      allow delete: if isValidId(uid) && isBootstrappedAdmin();
+    }
+
+    match /users/{uid} {
+      allow get: if isValidId(uid) && isAdmin();
+      allow list: if isBootstrappedAdmin();
+      allow create: if isValidId(uid) &&
+        isAdmin() &&
+        isValidUserAccount(incoming()) &&
+        incoming().uid == uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(uid) &&
+        isAdmin() &&
+        isValidUserAccount(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'employeeId', 'divisionGroup', 'roleLevel', 'updatedAt']);
+      allow delete: if isValidId(uid) && isAdmin();
+    }
+
+    match /access_rules/{roleId} {
+      allow get: if isValidId(roleId) && isAdmin();
+      allow list: if isBootstrappedAdmin();
+      allow create: if isValidId(roleId) &&
+        isAdmin() &&
+        isValidAccessRule(incoming()) &&
+        incoming().doc_id == roleId &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(roleId) &&
+        isAdmin() &&
+        isValidAccessRule(incoming()) &&
+        incoming().doc_id == existing().doc_id &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['position', 'home', 'partner', 'stock', 'pog', 'overview', 'temp', 'access', 'updatedAt']);
+      allow delete: if isValidId(roleId) && isAdmin();
+    }
+
+    match /employees/{empId} {
+      allow get: if isValidId(empId) && isAdmin();
+      allow list: if isBootstrappedAdmin();
+      allow create: if isValidId(empId) &&
+        isAdmin() &&
+        isValidEmployee(incoming()) &&
+        incoming().doc_id == empId &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(empId) &&
+        isAdmin() &&
+        isValidEmployee(incoming()) &&
+        incoming().doc_id == existing().doc_id &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'username', 'full_name', 'position', 'role_level', 'upline_id',
+          'subordinate_ids', 'access_scope_ids', 'division_group',
+          'province', 'area', 'status', 'picEmail', 'updatedAt'
+        ]);
+      allow delete: if isValidId(empId) && isAdmin();
+    }
+
+    match /partners/{partnerId} {
+      allow get: if isValidId(partnerId) && isAdmin();
+      allow list: if isBootstrappedAdmin();
+      allow create: if isValidId(partnerId) &&
+        isAdmin() &&
+        isValidPartner(incoming()) &&
+        incoming().doc_id == partnerId &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (
+          !('pic_employee_id' in incoming()) ||
+          incoming().pic_employee_id == null ||
+          existsAfter(/databases/$(database)/documents/employees/$(incoming().pic_employee_id))
+        );
+      allow update: if isValidId(partnerId) &&
+        isAdmin() &&
+        isValidPartner(incoming()) &&
+        incoming().doc_id == existing().doc_id &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'partner_name', 'category', 'pic_employee_id', 'pic_name',
+          'division_group', 'province', 'area', 'picEmail', 'updatedAt'
+        ]);
+      allow delete: if isValidId(partnerId) && isAdmin();
+    }
+
+    match /hybrids/{hybridId} {
+      allow get: if isValidId(hybridId) && isAdmin();
+      allow list: if isBootstrappedAdmin();
+      allow create: if isValidId(hybridId) &&
+        isAdmin() &&
+        isValidHybrid(incoming()) &&
+        incoming().doc_id == hybridId &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(hybridId) &&
+        isAdmin() &&
+        isValidHybrid(incoming()) &&
+        incoming().doc_id == existing().doc_id &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['hybrid_name', 'crop_type', 'updatedAt']);
+      allow delete: if isValidId(hybridId) && isAdmin();
+    }
+
+    match /lots/{lotNo} {
+      allow get: if isValidId(lotNo) && isAdmin();
+      allow list: if isBootstrappedAdmin();
+      allow create: if isValidId(lotNo) &&
+        isAdmin() &&
+        isValidLot(incoming()) &&
+        incoming().doc_id == lotNo &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (
+          !('hybrid_id' in incoming()) ||
+          incoming().hybrid_id == null ||
+          existsAfter(/databases/$(database)/documents/hybrids/$(incoming().hybrid_id))
+        );
+      allow update: if isValidId(lotNo) &&
+        isAdmin() &&
+        isValidLot(incoming()) &&
+        incoming().doc_id == existing().doc_id &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['hybrid_id', 'shipping_date', 'exp_date', 'initial_dr_kg', 'updatedAt']);
+      allow delete: if isValidId(lotNo) && isAdmin();
+    }
+
+    match /dr_shipments/{drId} {
+      allow get: if isValidId(drId) && isAdmin();
+      allow list: if isBootstrappedAdmin();
+      allow create: if isValidId(drId) &&
+        isAdmin() &&
+        isValidDrShipment(incoming()) &&
+        incoming().doc_id == drId &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        existsAfter(/databases/$(database)/documents/lots/$(incoming().lot_no)) &&
+        (
+          !('partner_id' in incoming()) ||
+          incoming().partner_id == null ||
+          existsAfter(/databases/$(database)/documents/partners/$(incoming().partner_id))
+        );
+      allow update: if isValidId(drId) &&
+        isAdmin() &&
+        isValidDrShipment(incoming()) &&
+        incoming().doc_id == existing().doc_id &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['shipping_date', 'partner_id', 'lot_no', 'exp_date', 'shipped_qty_kg', 'updatedAt']);
+      allow delete: if isValidId(drId) && isAdmin();
+    }
+
+    match /opname_logs/{logId} {
+      allow get: if isValidId(logId) && isAdmin();
+      allow list: if isBootstrappedAdmin();
+      allow create: if isValidId(logId) &&
+        isAdmin() &&
+        isValidOpnameLog(incoming()) &&
+        incoming().doc_id == logId &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        existsAfter(/databases/$(database)/documents/lots/$(incoming().lot_no)) &&
+        (
+          !('partner_id' in incoming()) ||
+          incoming().partner_id == null ||
+          existsAfter(/databases/$(database)/documents/partners/$(incoming().partner_id))
+        ) &&
+        (
+          !('checker_id' in incoming()) ||
+          incoming().checker_id == null ||
+          existsAfter(/databases/$(database)/documents/employees/$(incoming().checker_id))
+        );
+      allow update: if isValidId(logId) &&
+        isAdmin() &&
+        isValidOpnameLog(incoming()) &&
+        incoming().doc_id == existing().doc_id &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'partner_id', 'lot_no', 'checker_id', 'crop_year',
+          'apr', 'mei', 'jun', 'jul', 'ags', 'sep', 'okt', 'nov', 'des', 'jan', 'feb', 'mar',
+          'updatedAt'
+        ]);
+      allow delete: if isValidId(logId) && isAdmin();
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "radaradv16112026",
+  "description": "Imported from GitHub: wirawrtm/radaradv100726",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
