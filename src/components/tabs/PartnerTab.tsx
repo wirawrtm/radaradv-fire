@@ -53,6 +53,7 @@ interface PartnerTabProps {
   allCategories: string[];
   availableGroups: string[];
   accessRules: Record<string, Record<string, boolean>>;
+  canEdit?: boolean;
 }
 
 export default function PartnerTab({
@@ -89,6 +90,7 @@ export default function PartnerTab({
   allCategories,
   availableGroups,
   accessRules,
+  canEdit = true,
 }: PartnerTabProps) {
   const [partnerSubTab, setPartnerSubTab] = useState<"team" | "channel">(
     userLevel === 1 ? "channel" : "team",
@@ -177,46 +179,50 @@ export default function PartnerTab({
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0 z-10 relative">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const emp = employees.find((emp) =>
-                          matchNames(emp.name, sub),
-                        );
-                        setEmployeeEditModal({
-                          isOpen: true,
-                          item: emp || {
-                            name: sub,
-                            position: subPos,
-                            province: subProvince,
-                          },
-                        });
-                      }}
-                      className="size-7 bg-[#edecff]/60 hover:bg-[#edecff] text-primary rounded-full border border-[#c4c5d8]/40 flex items-center justify-center transition-all shadow-none cursor-pointer"
-                      title="Edit Karyawan"
-                    >
-                      <span className="material-symbols-outlined text-[13px]">
-                        edit
-                      </span>
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const emp = employees.find((emp) =>
-                          matchNames(emp.name, sub),
-                        );
-                        setEmployeeDeleteModal({
-                          isOpen: true,
-                          item: emp || { name: sub },
-                        });
-                      }}
-                      className="size-7 bg-red-50 hover:bg-red-100 text-red-500 rounded-full border border-red-100 flex items-center justify-center transition-all shadow-none cursor-pointer"
-                      title="Hapus Karyawan"
-                    >
-                      <span className="material-symbols-outlined text-[13px]">
-                        delete
-                      </span>
-                    </button>
+                    {canEdit && (
+                      <>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const emp = employees.find((emp) =>
+                              matchNames(emp.name, sub),
+                            );
+                            setEmployeeEditModal({
+                              isOpen: true,
+                              item: emp || {
+                                name: sub,
+                                position: subPos,
+                                province: subProvince,
+                              },
+                            });
+                          }}
+                          className="size-7 bg-[#edecff]/60 hover:bg-[#edecff] text-primary rounded-full border border-[#c4c5d8]/40 flex items-center justify-center transition-all shadow-none cursor-pointer"
+                          title="Edit Karyawan"
+                        >
+                          <span className="material-symbols-outlined text-[13px]">
+                            edit
+                          </span>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const emp = employees.find((emp) =>
+                              matchNames(emp.name, sub),
+                            );
+                            setEmployeeDeleteModal({
+                              isOpen: true,
+                              item: emp || { name: sub },
+                            });
+                          }}
+                          className="size-7 bg-red-50 hover:bg-red-100 text-red-500 rounded-full border border-red-100 flex items-center justify-center transition-all shadow-none cursor-pointer"
+                          title="Hapus Karyawan"
+                        >
+                          <span className="material-symbols-outlined text-[13px]">
+                            delete
+                          </span>
+                        </button>
+                      </>
+                    )}
                     {hasChildren && (
                       <span className="material-symbols-outlined text-[#8E94B7] text-md leading-none select-none ml-1">
                         {isCollapsed ? "expand_more" : "expand_less"}
@@ -293,33 +299,35 @@ export default function PartnerTab({
                   Hirarki Posisi Tim
                 </h3>
               </div>
-              <button
-                disabled={userLevel === 1}
-                onClick={() =>
-                  setEmployeeEditModal({
-                    isOpen: true,
-                    item: {
-                      isAdd: true,
-                      name: "",
-                      position: "",
-                      province: "",
-                      email: "",
-                      password: "",
-                      upline: userData?.name || "",
-                    },
-                  })
-                }
-                className={`h-8 px-4 rounded-full font-bold text-[9px] uppercase tracking-wider flex items-center gap-1.5 transition-all shrink-0 ${
-                  userLevel === 1
-                    ? "bg-slate-200 text-slate-400 cursor-not-allowed"
-                    : "bg-gradient-to-r from-teal-500 to-emerald-500 text-white hover:opacity-95 shadow-md active:scale-[97%] cursor-pointer"
-                }`}
-              >
-                <span className="material-symbols-outlined text-[13px]">
-                  person_add
-                </span>
-                Tambah Anggota
-              </button>
+              {canEdit && (
+                <button
+                  disabled={userLevel === 1}
+                  onClick={() =>
+                    setEmployeeEditModal({
+                      isOpen: true,
+                      item: {
+                        isAdd: true,
+                        name: "",
+                        position: "",
+                        province: "",
+                        email: "",
+                        password: "",
+                        upline: userData?.name || "",
+                      },
+                    })
+                  }
+                  className={`h-8 px-4 rounded-full font-bold text-[9px] uppercase tracking-wider flex items-center gap-1.5 transition-all shrink-0 ${
+                    userLevel === 1
+                      ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                      : "bg-gradient-to-r from-teal-500 to-emerald-500 text-white hover:opacity-95 shadow-md active:scale-[97%] cursor-pointer"
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[13px]">
+                    person_add
+                  </span>
+                  Tambah Anggota
+                </button>
+              )}
             </div>
 
             {teamMembers.length > 0 ? (
@@ -361,48 +369,52 @@ export default function PartnerTab({
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0 ml-3 z-10 relative">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const emp = employees.find((emp) =>
-                            matchNames(emp.name, userData.name),
-                          );
-                          setEmployeeEditModal({
-                            isOpen: true,
-                            item: emp || {
-                              name: userData.name,
-                              position: userData.position,
-                              province: userData.province || "",
-                              email: userData.email || "",
-                            },
-                          });
-                        }}
-                        className="size-7 bg-white/80 hover:bg-white text-primary rounded-full border border-[#edecff] flex items-center justify-center transition-all shadow-sm cursor-pointer"
-                        title="Edit Karyawan"
-                      >
-                        <span className="material-symbols-outlined text-[14px]">
-                          edit
-                        </span>
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const emp = employees.find((emp) =>
-                            matchNames(emp.name, userData.name),
-                          );
-                          setEmployeeDeleteModal({
-                            isOpen: true,
-                            item: emp || { name: userData.name },
-                          });
-                        }}
-                        className="size-7 bg-red-50 hover:bg-red-100 text-red-500 rounded-full border border-red-100 flex items-center justify-center transition-all shadow-sm cursor-pointer"
-                        title="Hapus Karyawan"
-                        disabled={matchNames(userData.name, "Aditya Wiratama")}
-                      >
-                        <span className="material-symbols-outlined text-[14px]">
-                          delete
-                        </span>
-                      </button>
+                      {canEdit && (
+                        <>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const emp = employees.find((emp) =>
+                                matchNames(emp.name, userData.name),
+                              );
+                              setEmployeeEditModal({
+                                isOpen: true,
+                                item: emp || {
+                                  name: userData.name,
+                                  position: userData.position,
+                                  province: userData.province || "",
+                                  email: userData.email || "",
+                                },
+                              });
+                            }}
+                            className="size-7 bg-white/80 hover:bg-white text-primary rounded-full border border-[#edecff] flex items-center justify-center transition-all shadow-sm cursor-pointer"
+                            title="Edit Karyawan"
+                          >
+                            <span className="material-symbols-outlined text-[14px]">
+                              edit
+                            </span>
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const emp = employees.find((emp) =>
+                                matchNames(emp.name, userData.name),
+                              );
+                              setEmployeeDeleteModal({
+                                isOpen: true,
+                                item: emp || { name: userData.name },
+                              });
+                            }}
+                            className="size-7 bg-red-50 hover:bg-red-100 text-red-500 rounded-full border border-red-100 flex items-center justify-center transition-all shadow-sm cursor-pointer"
+                            title="Hapus Karyawan"
+                            disabled={matchNames(userData.name, "Aditya Wiratama")}
+                          >
+                            <span className="material-symbols-outlined text-[14px]">
+                              delete
+                            </span>
+                          </button>
+                        </>
+                      )}
                       {rootSubordinates.length > 0 && (
                         <span className="material-symbols-outlined text-[#8E94B7] text-md leading-none select-none ml-1">
                           {collapsedNodes[userData.name] !== false
@@ -486,23 +498,25 @@ export default function PartnerTab({
                 Daftar Partner
               </h3>
             </div>
-            <button
-              onClick={() =>
-                setPartnerEditModal({
-                  isOpen: true,
-                  item: {
-                    isAdd: true,
-                    category: mappingCategory || "Kios",
-                    name: "",
-                    pic: "",
-                  },
-                })
-              }
-              className="h-8 px-4 bg-gradient-to-r from-teal-500 to-emerald-500 text-white rounded-full font-bold text-[9px] uppercase tracking-wider flex items-center gap-1.5 hover:opacity-95 transition-all shadow-md active:scale-[97%] cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-[13px]">add</span>
-              Tambah Partner
-            </button>
+            {canEdit && (
+              <button
+                onClick={() =>
+                  setPartnerEditModal({
+                    isOpen: true,
+                    item: {
+                      isAdd: true,
+                      category: mappingCategory || "Kios",
+                      name: "",
+                      pic: "",
+                    },
+                  })
+                }
+                className="h-8 px-4 bg-gradient-to-r from-teal-500 to-emerald-500 text-white rounded-full font-bold text-[9px] uppercase tracking-wider flex items-center gap-1.5 hover:opacity-95 transition-all shadow-md active:scale-[97%] cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[13px]">add</span>
+                Tambah Partner
+              </button>
+            )}
           </div>
 
           <div className="space-y-3">
@@ -549,32 +563,34 @@ export default function PartnerTab({
                       )}
                     </div>
                   </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() =>
-                        setPartnerEditModal({ isOpen: true, item: channel })
-                      }
-                      className="size-9 bg-[#edecff] text-primary rounded-full border border-[#c4c5d8] flex items-center justify-center hover:bg-[#e6e6ff] transition-all shadow-none cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">
-                        edit
-                      </span>
-                    </button>
-                    <button
-                      onClick={() =>
-                        setPartnerDeleteModal({
-                          isOpen: true,
-                          item: channel,
-                        })
-                      }
-                      className="size-9 bg-red-50 text-red-500 rounded-full border border-red-100 flex items-center justify-center hover:bg-red-100 transition-all shadow-none cursor-pointer"
-                      title="Hapus Partner"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">
-                        delete
-                      </span>
-                    </button>
-                  </div>
+                  {canEdit && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() =>
+                          setPartnerEditModal({ isOpen: true, item: channel })
+                        }
+                        className="size-9 bg-[#edecff] text-primary rounded-full border border-[#c4c5d8] flex items-center justify-center hover:bg-[#e6e6ff] transition-all shadow-none cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">
+                          edit
+                        </span>
+                      </button>
+                      <button
+                        onClick={() =>
+                          setPartnerDeleteModal({
+                            isOpen: true,
+                            item: channel,
+                          })
+                        }
+                        className="size-9 bg-red-50 text-red-500 rounded-full border border-red-100 flex items-center justify-center hover:bg-red-100 transition-all shadow-none cursor-pointer"
+                        title="Hapus Partner"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">
+                          delete
+                        </span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))
             )}

@@ -9,6 +9,20 @@ import Dashboard from "./components/Dashboard";
 import { useFirebase } from "./contexts/FirebaseContext";
 import { BOOTSTRAPPED_ADMIN_EMAIL, isBootstrappedAdminEmail } from "./firebase";
 
+const PUBLIC_VIEWER_SESSION = {
+  name: "RADAR User",
+  position: "Business Analyst",
+  division: "All",
+  group: "All",
+  reportTo: "-",
+  office: "Akses Terbuka",
+  area: "All Area",
+  user: "public",
+  email: "",
+  level: "5",
+  isPublic: true,
+};
+
 export default function App() {
   const {
     firebaseUser,
@@ -16,6 +30,7 @@ export default function App() {
     isAuthorizedFirebase,
     disconnectGoogle,
   } = useFirebase();
+  const [showAdminLoginModal, setShowAdminLoginModal] = useState(false);
   const [userData, setUserData] = useState<any>(() => {
     try {
       const session = localStorage.getItem("radar_user_session");
@@ -24,51 +39,20 @@ export default function App() {
         const u = String(parsed?.user || parsed?.email || "").trim().toLowerCase();
         if (u === "adityahead" || u === "adityaheadoffice") {
           localStorage.removeItem("radar_user_session");
-          return null;
+          return PUBLIC_VIEWER_SESSION;
         }
         if (isBootstrappedAdminEmail(parsed?.email || parsed?.user)) {
-          return parsed;
+          return { ...parsed, isPublic: false };
         }
         localStorage.removeItem("radar_user_session");
       }
     } catch (e) {
       console.error("Failed to load user session", e);
     }
-    return null;
+    return PUBLIC_VIEWER_SESSION;
   });
 
-  const [activeTab, setActiveTab] = useState<string>(() => {
-    try {
-      const session = localStorage.getItem("radar_user_session");
-      if (session) {
-        const parsed = JSON.parse(session);
-        const posClean = cleanForMatch(parsed.position || "");
-        const isAdminUser =
-          (parsed.level &&
-            String(parsed.level).toLowerCase().trim() === "admin") ||
-          isBootstrappedAdminEmail(parsed?.email || parsed?.user);
-
-        if (posClean === "businessanalyst" || isAdminUser) {
-          const rules = localStorage.getItem("appAccessRules");
-          if (rules) {
-            const parsedRules = JSON.parse(rules);
-            const matchingKey = Object.keys(parsedRules).find(
-              (key) =>
-                cleanForMatch(key) === "businessanalyst" ||
-                cleanForMatch(key) === "admin",
-            );
-            if (matchingKey && parsedRules[matchingKey]?.overview === false) {
-              return "home";
-            }
-          }
-          return "overview";
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to determine initial tab:", e);
-    }
-    return "home";
-  });
+  const [activeTab, setActiveTab] = useState<string>("overview");
 
   const [isMenuVisible, setIsMenuVisible] = useState(true);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
@@ -82,9 +66,11 @@ export default function App() {
   const [filterBelowCrop, setFilterBelowCrop] = useState("All");
 
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
-  const isSoleAdmin =
+  const isSoleAdmin = Boolean(
     userData &&
-    isBootstrappedAdminEmail(userData.email || userData.user);
+      !userData.isPublic &&
+      isBootstrappedAdminEmail(userData.email || userData.user),
+  );
 
   const normalizedPosition = useMemo(() => {
     if (!userData) return "";
@@ -103,34 +89,25 @@ export default function App() {
 
   const handleLoginState = (session: any) => {
     try {
-      if (session) {
-        localStorage.setItem("radar_user_session", JSON.stringify(session));
+      if (session && !session.isPublic) {
+        const adminSession = { ...session, isPublic: false };
+        localStorage.setItem("radar_user_session", JSON.stringify(adminSession));
         localStorage.removeItem("radar_logged_out");
-        const cleanPos = cleanForMatch(session.position || "");
-        const cleanName = cleanForMatch(session.name || "");
-        const isAdminUser =
-          session.level &&
-          String(session.level).toLowerCase().trim() === "admin";
-
-        setActiveTab(
-          cleanPos === "businessanalyst" ||
-            cleanName === "adityawiratama" ||
-            cleanName === "aditya" ||
-            isAdminUser
-            ? "overview"
-            : "home",
-        );
+        setActiveTab("overview");
         setFilterBelowCrop("All");
+        setUserData(adminSession);
+        setShowAdminLoginModal(false);
+        return;
       } else {
         localStorage.removeItem("radar_user_session");
         localStorage.setItem("radar_logged_out", "true");
-        setActiveTab("home");
+        setActiveTab("overview");
         setFilterBelowCrop("All");
       }
     } catch (e) {
       console.error("Failed to save user session", e);
     }
-    setUserData(session);
+    setUserData(PUBLIC_VIEWER_SESSION);
   };
 
   const handleLogout = () => {
@@ -145,15 +122,15 @@ export default function App() {
   };
 
   const tabPermissions = useMemo(() => {
-    if (!userData) {
+    if (!userData || userData.isPublic) {
       return {
-        home: false,
-        partner: false,
-        stock: false,
-        pog: false,
-        overview: false,
-        temp: false,
-        access: false,
+        home: true,
+        partner: true,
+        stock: true,
+        pog: true,
+        overview: true,
+        temp: true,
+        access: true,
       };
     }
     const pos = userData.position || "";
@@ -190,7 +167,7 @@ export default function App() {
       temp: true,
       access: true,
     };
-  }, [userData, normalizedPosition, accessRules]);
+  }, [userData, isSoleAdmin, normalizedPosition, accessRules]);
 
   const hasHomeTab = userData ? !!tabPermissions.home : false;
   const hasPartnerTab = userData ? !!tabPermissions.partner : false;
@@ -329,8 +306,9 @@ export default function App() {
       const emailLower = String(
         firebaseUser.email || BOOTSTRAPPED_ADMIN_EMAIL,
       ).toLowerCase();
+      setShowAdminLoginModal(false);
       setUserData((prev: any) => {
-        if (prev && isBootstrappedAdminEmail(prev.email || prev.user)) {
+        if (prev && !prev.isPublic && isBootstrappedAdminEmail(prev.email || prev.user)) {
           return prev;
         }
         const session = {
@@ -344,6 +322,7 @@ export default function App() {
           user: emailLower,
           email: emailLower,
           level: "5",
+          isPublic: false,
         };
         try {
           localStorage.setItem("radar_user_session", JSON.stringify(session));
@@ -360,7 +339,7 @@ export default function App() {
       } catch {
         // ignore storage quota
       }
-      setUserData(null);
+      setUserData(PUBLIC_VIEWER_SESSION);
     }
 
     setIsCheckingSession(false);
@@ -589,19 +568,32 @@ export default function App() {
         </div>
 
         <div className="p-3 lg:p-4 pb-6 border-t border-[#154be2]/10">
-          <button
-            onClick={handleLogout}
-            className="flex items-center justify-center lg:justify-start gap-3 h-12 w-full rounded-xl transition-all text-[#8E94B7] hover:bg-red-50 hover:text-red-600"
-          >
-            <span className="material-symbols-outlined ml-0 lg:ml-4">
-              logout
-            </span>
-            <span
-              className={`font-semibold text-xs hidden ${isSidebarExpanded ? "lg:block" : ""}`}
+          {isSoleAdmin ? (
+            <button
+              onClick={handleLogout}
+              className="flex items-center justify-center lg:justify-start gap-3 h-12 w-full rounded-xl transition-all text-[#8E94B7] hover:bg-red-50 hover:text-red-600 cursor-pointer"
             >
-              Keluar System
-            </span>
-          </button>
+              <span className="material-symbols-outlined ml-0 lg:ml-4">
+                logout
+              </span>
+              <span
+                className={`font-semibold text-xs hidden ${isSidebarExpanded ? "lg:block" : ""}`}
+              >
+                Keluar Akun
+              </span>
+            </button>
+          ) : (
+            <div className="flex items-center justify-center lg:justify-start gap-3 h-12 w-full rounded-xl text-emerald-700 bg-emerald-50/80 border border-emerald-200/70">
+              <span className="material-symbols-outlined ml-0 lg:ml-4 text-[19px]">
+                lock_open
+              </span>
+              <span
+                className={`font-bold text-xs hidden ${isSidebarExpanded ? "lg:block" : ""}`}
+              >
+                Akses Terbuka
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -610,6 +602,7 @@ export default function App() {
           userData={userData}
           activeTab={activeTab}
           onLogout={handleLogout}
+          onOpenAdminLogin={() => setShowAdminLoginModal(true)}
           onUserSwitch={handleUserLogin}
           setUserData={setUserData}
           setActiveTab={setActiveTab}
@@ -805,6 +798,15 @@ export default function App() {
             keyboard_arrow_up
           </span>
         </button>
+      )}
+
+      {showAdminLoginModal && (
+        <div className="fixed inset-0 z-[120] overflow-y-auto animate-in fade-in duration-200">
+          <Login
+            onLogin={handleLoginState}
+            onClose={() => setShowAdminLoginModal(false)}
+          />
+        </div>
       )}
     </div>
   ) : (

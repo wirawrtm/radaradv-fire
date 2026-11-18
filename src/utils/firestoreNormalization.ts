@@ -207,8 +207,6 @@ export function buildNormalizedCollections(params: {
     const position = clampStr(e.position || "Business Solution", 100, "Business Solution");
     const role_level = getRoleLevel(position, e.level ?? e.role_level);
     const division_group = toStrictDivision(e.group || e.division_group || position);
-    const rawEmail = String(e.email || "").trim();
-    const picEmail = rawEmail.includes("@") ? clampStr(rawEmail.toLowerCase(), 120) : null;
 
     return {
       doc_id,
@@ -223,7 +221,6 @@ export function buildNormalizedCollections(params: {
       province: clampStr(e.province || "-", 80, "-"),
       area: clampStr(e.area || e.province || "-", 80, "-"),
       status: String(e.status || "").toLowerCase().includes("non") ? "Nonaktif" : "Aktif",
-      ...(picEmail ? { picEmail } : {}),
       _raw: e,
       _password: String(e.password || "123").trim(),
     };
@@ -309,7 +306,6 @@ export function buildNormalizedCollections(params: {
       division_group: emp ? (emp.division_group === "All" ? toStrictDivision(groupRaw) : emp.division_group) : toStrictDivision(groupRaw),
       province: clampStr(provRaw || emp?.province || "-", 80, "-"),
       area: clampStr(areaRaw || provRaw || emp?.area || "-", 80, "-"),
-      ...(emp?.picEmail ? { picEmail: emp.picEmail } : {}),
       _raw: rawObj,
     });
   };

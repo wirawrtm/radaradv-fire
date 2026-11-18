@@ -42,12 +42,8 @@ export interface FirestoreAllData {
   accessRules: Record<string, Record<string, boolean>>;
 }
 
-const getScopedQuery = (colName: string, user: User) => {
-  const colRef = collection(db, colName);
-  if (isBootstrappedAdminEmail(user.email)) {
-    return colRef;
-  }
-  return query(colRef, where("ownerUid", "==", user.uid));
+const getScopedQuery = (colName: string, _user?: User | null) => {
+  return collection(db, colName);
 };
 
 const bootstrapInFlight = new Map<string, Promise<void>>();
@@ -112,15 +108,34 @@ export async function ensureUserBootstrap(user: User): Promise<void> {
   }
 }
 
-export async function fetchAllFirestoreData(user: User): Promise<FirestoreAllData> {
+export function isPermissionDeniedError(err: unknown): boolean {
+  const code = String((err as any)?.code || "").toLowerCase();
+  const msg = String((err as any)?.message || err || "").toLowerCase();
+  return (
+    code.includes("permission-denied") ||
+    msg.includes("permission") ||
+    msg.includes("insufficient")
+  );
+}
+
+export async function fetchAllFirestoreData(user: User | null): Promise<FirestoreAllData> {
   const fetchCol = async <T,>(colName: string): Promise<T[]> => {
     try {
       const snap = await getDocs(getScopedQuery(colName, user));
       return snap.docs.map((d) => ({ doc_id: d.id, ...(d.data() as any) })) as T[];
     } catch (err) {
+      if (!user && isPermissionDeniedError(err)) {
+        throw err;
+      }
       handleFirestoreError(err, OperationType.LIST, colName);
     }
   };
+
+  // Preflight a single collection in public mode so unpublished Console rules fail cleanly in 1 request without 7x error spam
+  let preflightAccessDocs: any[] | null = null;
+  if (!user) {
+    preflightAccessDocs = await fetchCol<any>("access_rules");
+  }
 
   const [employees, partners, hybrids, lots, dr_shipments, opname_logs, accessDocs] =
     await Promise.all([
@@ -130,7 +145,7 @@ export async function fetchAllFirestoreData(user: User): Promise<FirestoreAllDat
       fetchCol<LotFsDoc>("lots"),
       fetchCol<DrShipmentFsDoc>("dr_shipments"),
       fetchCol<OpnameLogFsDoc>("opname_logs"),
-      fetchCol<any>("access_rules"),
+      preflightAccessDocs !== null ? Promise.resolve(preflightAccessDocs) : fetchCol<any>("access_rules"),
     ]);
 
   const accessRules: Record<string, Record<string, boolean>> = {};
@@ -162,8 +177,9 @@ export async function fetchAllFirestoreData(user: User): Promise<FirestoreAllDat
 }
 
 export function subscribeToFirestoreCollections(
-  user: User,
+  user: User | null,
   onUpdate: (partial: Partial<FirestoreAllData>) => void,
+  onError?: (error: unknown, colName: string) => void,
 ): Unsubscribe {
   const unsubs: Unsubscribe[] = [];
 
@@ -176,7 +192,11 @@ export function subscribeToFirestoreCollections(
         apply(docs);
       },
       (error) => {
-        handleFirestoreError(error, OperationType.LIST, colName);
+        if (onError) {
+          onError(error, colName);
+        } else {
+          handleFirestoreError(error, OperationType.LIST, colName);
+        }
       },
     );
     unsubs.push(unsub);
@@ -273,7 +293,7 @@ async function commitInChunks(
   }
 }
 
-async function getExistingDocIds(colName: string, user: User): Promise<Set<string>> {
+async function getExistingDocIds(colName: string, user?: User | null): Promise<Set<string>> {
   try {
     const snap = await getDocs(getScopedQuery(colName, user));
     return new Set(snap.docs.map((d) => d.id));
@@ -287,13 +307,15 @@ async function getExistingDocIds(colName: string, user: User): Promise<Set<strin
  * Executes in 3 referentially safe stages (existsAfter constraints satisfied at every step).
  */
 export async function migrateNormalizedDatasetToFirestore(
-  user: User,
+  user: User | null | undefined,
   dataset: NormalizedDataset,
   accessRules: Record<string, Record<string, boolean>>,
   onStage?: (msg: string) => void,
 ): Promise<{ totalDocs: number }> {
-  await ensureUserBootstrap(user);
-  const ownerUid = user.uid;
+  if (user?.uid && user?.email) {
+    await ensureUserBootstrap(user);
+  }
+  const ownerUid = user?.uid || "public";
 
   onStage?.("Memeriksa dokumen existing di Firestore...");
   const [
@@ -359,7 +381,6 @@ export async function migrateNormalizedDatasetToFirestore(
         province: clampStr(e.province, 80, "-"),
         area: clampStr(e.area, 80, "-"),
         status: e.status === "Nonaktif" ? "Nonaktif" : "Aktif",
-        ...(e.picEmail ? { picEmail: clampStr(e.picEmail, 120) } : {}),
         ownerUid,
       },
     });
@@ -408,7 +429,6 @@ export async function migrateNormalizedDatasetToFirestore(
         division_group: toStrictDivision(p.division_group),
         province: clampStr(p.province, 80, "-"),
         area: clampStr(p.area, 80, "-"),
-        ...(p.picEmail ? { picEmail: clampStr(p.picEmail, 120) } : {}),
         ownerUid,
       },
     });
@@ -499,13 +519,14 @@ export async function migrateNormalizedDatasetToFirestore(
 }
 
 // ============================================================================
-// DIRECT FIRESTORE CRUD HELPERS (USED WHEN AUTHENTICATED)
+// DIRECT FIRESTORE CRUD HELPERS (OPEN ACCESS: WORKS WITH OR WITHOUT SIGN-IN)
 // ============================================================================
 
 export async function saveAccessRulesFirestore(
-  user: User,
+  user: User | null | undefined,
   rules: Record<string, Record<string, boolean>>,
 ): Promise<void> {
+  const ownerUid = user?.uid || "public";
   const existing = await getExistingDocIds("access_rules", user);
   const ops = Object.entries(rules).map(([position, perms]) => {
     const docId = toValidDocId(position, "ROLE");
@@ -523,7 +544,7 @@ export async function saveAccessRulesFirestore(
         overview: !!perms.overview,
         temp: !!perms.temp,
         access: !!perms.access,
-        ownerUid: user.uid,
+        ownerUid,
       },
     };
   });
@@ -531,7 +552,7 @@ export async function saveAccessRulesFirestore(
 }
 
 export async function upsertPartnerFirestore(
-  user: User,
+  user: User | null | undefined,
   partner: {
     doc_id: string;
     partner_name: string;
@@ -544,6 +565,7 @@ export async function upsertPartnerFirestore(
   },
   isCreate: boolean,
 ): Promise<void> {
+  const ownerUid = user?.uid || "public";
   const docId = toValidDocId(partner.doc_id);
   const path = `partners/${docId}`;
   const ref = doc(db, "partners", docId);
@@ -558,7 +580,7 @@ export async function upsertPartnerFirestore(
         division_group: toStrictDivision(partner.division_group),
         province: clampStr(partner.province, 80, "-"),
         area: clampStr(partner.area, 80, "-"),
-        ownerUid: user.uid,
+        ownerUid,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -590,10 +612,11 @@ export async function deletePartnerFirestore(docId: string): Promise<void> {
 }
 
 export async function upsertEmployeeFirestore(
-  user: User,
+  user: User | null | undefined,
   emp: EmployeeFsDoc,
   isCreate: boolean,
 ): Promise<void> {
+  const ownerUid = user?.uid || "public";
   const docId = toValidDocId(emp.doc_id);
   const path = `employees/${docId}`;
   const ref = doc(db, "employees", docId);
@@ -616,7 +639,7 @@ export async function upsertEmployeeFirestore(
       await setDoc(ref, {
         doc_id: docId,
         ...baseFields,
-        ownerUid: user.uid,
+        ownerUid,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -645,7 +668,7 @@ export async function deleteEmployeeFirestore(docId: string): Promise<void> {
  * Save DR Spreadsheet upload directly to Firestore (hybrids -> partners & lots -> dr_shipments).
  */
 export async function saveUploadedDrToFirestore(
-  user: User,
+  user: User | null | undefined,
   parsedRows: Array<{
     channel: string;
     lot: string;
@@ -657,7 +680,7 @@ export async function saveUploadedDrToFirestore(
   }>,
   currentDataset: NormalizedDataset,
 ): Promise<{ uploadedCount: number; createdPartners: number }> {
-  const ownerUid = user.uid;
+  const ownerUid = user?.uid || "public";
   const existingPartnersByClean = new Map<string, PartnerFsDoc>();
   const existingPartnerIds = new Set<string>();
   currentDataset.partners.forEach((p) => {
@@ -842,7 +865,7 @@ export async function saveUploadedDrToFirestore(
  * Persist HomeTab batch opname submission into Firestore (hybrids/lots if new + opname_logs).
  */
 export async function saveBatchActivityToFirestore(
-  user: User,
+  user: User | null | undefined,
   params: {
     kioskName: string;
     checkerName: string;
@@ -851,7 +874,7 @@ export async function saveBatchActivityToFirestore(
   },
 ): Promise<void> {
   const { kioskName, checkerName, items, currentDataset } = params;
-  const ownerUid = user.uid;
+  const ownerUid = user?.uid || "public";
 
   const partner = currentDataset.partners.find(
     (p) => cleanForMatch(p.partner_name) === cleanForMatch(kioskName),

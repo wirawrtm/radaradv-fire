@@ -234,8 +234,12 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isPublicOrAuthOwnerUid(ownerUid) {
+      return ownerUid == (isSignedIn() ? request.auth.uid : 'public');
+    }
+
     // =========================================================================
-    // COLLECTION MATCH BLOCKS (SOLE ACCESS: villatama11@gmail.com)
+    // COLLECTION MATCH BLOCKS (OPEN OPERATIONAL ACCESS; ADMIN-ONLY USERS/ADMINS)
     // =========================================================================
 
     match /admins/{uid} {
@@ -277,38 +281,34 @@ service cloud.firestore {
     }
 
     match /access_rules/{roleId} {
-      allow get: if isValidId(roleId) && isAdmin();
-      allow list: if isBootstrappedAdmin();
+      allow get: if isValidId(roleId);
+      allow list: if true;
       allow create: if isValidId(roleId) &&
-        isAdmin() &&
         isValidAccessRule(incoming()) &&
         incoming().doc_id == roleId &&
-        incoming().ownerUid == request.auth.uid &&
+        isPublicOrAuthOwnerUid(incoming().ownerUid) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
       allow update: if isValidId(roleId) &&
-        isAdmin() &&
         isValidAccessRule(incoming()) &&
         incoming().doc_id == existing().doc_id &&
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly(['position', 'home', 'partner', 'stock', 'pog', 'overview', 'temp', 'access', 'updatedAt']);
-      allow delete: if isValidId(roleId) && isAdmin();
+      allow delete: if isValidId(roleId);
     }
 
     match /employees/{empId} {
-      allow get: if isValidId(empId) && isAdmin();
-      allow list: if isBootstrappedAdmin();
+      allow get: if isValidId(empId);
+      allow list: if true;
       allow create: if isValidId(empId) &&
-        isAdmin() &&
         isValidEmployee(incoming()) &&
         incoming().doc_id == empId &&
-        incoming().ownerUid == request.auth.uid &&
+        isPublicOrAuthOwnerUid(incoming().ownerUid) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
       allow update: if isValidId(empId) &&
-        isAdmin() &&
         isValidEmployee(incoming()) &&
         incoming().doc_id == existing().doc_id &&
         incoming().ownerUid == existing().ownerUid &&
@@ -319,17 +319,16 @@ service cloud.firestore {
           'subordinate_ids', 'access_scope_ids', 'division_group',
           'province', 'area', 'status', 'picEmail', 'updatedAt'
         ]);
-      allow delete: if isValidId(empId) && isAdmin();
+      allow delete: if isValidId(empId);
     }
 
     match /partners/{partnerId} {
-      allow get: if isValidId(partnerId) && isAdmin();
-      allow list: if isBootstrappedAdmin();
+      allow get: if isValidId(partnerId);
+      allow list: if true;
       allow create: if isValidId(partnerId) &&
-        isAdmin() &&
         isValidPartner(incoming()) &&
         incoming().doc_id == partnerId &&
-        incoming().ownerUid == request.auth.uid &&
+        isPublicOrAuthOwnerUid(incoming().ownerUid) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
         (
@@ -338,7 +337,6 @@ service cloud.firestore {
           existsAfter(/databases/$(database)/documents/employees/$(incoming().pic_employee_id))
         );
       allow update: if isValidId(partnerId) &&
-        isAdmin() &&
         isValidPartner(incoming()) &&
         incoming().doc_id == existing().doc_id &&
         incoming().ownerUid == existing().ownerUid &&
@@ -348,38 +346,35 @@ service cloud.firestore {
           'partner_name', 'category', 'pic_employee_id', 'pic_name',
           'division_group', 'province', 'area', 'picEmail', 'updatedAt'
         ]);
-      allow delete: if isValidId(partnerId) && isAdmin();
+      allow delete: if isValidId(partnerId);
     }
 
     match /hybrids/{hybridId} {
-      allow get: if isValidId(hybridId) && isAdmin();
-      allow list: if isBootstrappedAdmin();
+      allow get: if isValidId(hybridId);
+      allow list: if true;
       allow create: if isValidId(hybridId) &&
-        isAdmin() &&
         isValidHybrid(incoming()) &&
         incoming().doc_id == hybridId &&
-        incoming().ownerUid == request.auth.uid &&
+        isPublicOrAuthOwnerUid(incoming().ownerUid) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
       allow update: if isValidId(hybridId) &&
-        isAdmin() &&
         isValidHybrid(incoming()) &&
         incoming().doc_id == existing().doc_id &&
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly(['hybrid_name', 'crop_type', 'updatedAt']);
-      allow delete: if isValidId(hybridId) && isAdmin();
+      allow delete: if isValidId(hybridId);
     }
 
     match /lots/{lotNo} {
-      allow get: if isValidId(lotNo) && isAdmin();
-      allow list: if isBootstrappedAdmin();
+      allow get: if isValidId(lotNo);
+      allow list: if true;
       allow create: if isValidId(lotNo) &&
-        isAdmin() &&
         isValidLot(incoming()) &&
         incoming().doc_id == lotNo &&
-        incoming().ownerUid == request.auth.uid &&
+        isPublicOrAuthOwnerUid(incoming().ownerUid) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
         (
@@ -388,24 +383,22 @@ service cloud.firestore {
           existsAfter(/databases/$(database)/documents/hybrids/$(incoming().hybrid_id))
         );
       allow update: if isValidId(lotNo) &&
-        isAdmin() &&
         isValidLot(incoming()) &&
         incoming().doc_id == existing().doc_id &&
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly(['hybrid_id', 'shipping_date', 'exp_date', 'initial_dr_kg', 'updatedAt']);
-      allow delete: if isValidId(lotNo) && isAdmin();
+      allow delete: if isValidId(lotNo);
     }
 
     match /dr_shipments/{drId} {
-      allow get: if isValidId(drId) && isAdmin();
-      allow list: if isBootstrappedAdmin();
+      allow get: if isValidId(drId);
+      allow list: if true;
       allow create: if isValidId(drId) &&
-        isAdmin() &&
         isValidDrShipment(incoming()) &&
         incoming().doc_id == drId &&
-        incoming().ownerUid == request.auth.uid &&
+        isPublicOrAuthOwnerUid(incoming().ownerUid) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
         existsAfter(/databases/$(database)/documents/lots/$(incoming().lot_no)) &&
@@ -415,24 +408,22 @@ service cloud.firestore {
           existsAfter(/databases/$(database)/documents/partners/$(incoming().partner_id))
         );
       allow update: if isValidId(drId) &&
-        isAdmin() &&
         isValidDrShipment(incoming()) &&
         incoming().doc_id == existing().doc_id &&
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly(['shipping_date', 'partner_id', 'lot_no', 'exp_date', 'shipped_qty_kg', 'updatedAt']);
-      allow delete: if isValidId(drId) && isAdmin();
+      allow delete: if isValidId(drId);
     }
 
     match /opname_logs/{logId} {
-      allow get: if isValidId(logId) && isAdmin();
-      allow list: if isBootstrappedAdmin();
+      allow get: if isValidId(logId);
+      allow list: if true;
       allow create: if isValidId(logId) &&
-        isAdmin() &&
         isValidOpnameLog(incoming()) &&
         incoming().doc_id == logId &&
-        incoming().ownerUid == request.auth.uid &&
+        isPublicOrAuthOwnerUid(incoming().ownerUid) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
         existsAfter(/databases/$(database)/documents/lots/$(incoming().lot_no)) &&
@@ -447,7 +438,6 @@ service cloud.firestore {
           existsAfter(/databases/$(database)/documents/employees/$(incoming().checker_id))
         );
       allow update: if isValidId(logId) &&
-        isAdmin() &&
         isValidOpnameLog(incoming()) &&
         incoming().doc_id == existing().doc_id &&
         incoming().ownerUid == existing().ownerUid &&
@@ -458,7 +448,7 @@ service cloud.firestore {
           'apr', 'mei', 'jun', 'jul', 'ags', 'sep', 'okt', 'nov', 'des', 'jan', 'feb', 'mar',
           'updatedAt'
         ]);
-      allow delete: if isValidId(logId) && isAdmin();
+      allow delete: if isValidId(logId);
     }
   }
 }

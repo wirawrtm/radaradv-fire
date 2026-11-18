@@ -5,9 +5,10 @@ import { BOOTSTRAPPED_ADMIN_EMAIL, isBootstrappedAdminEmail } from "../../fireba
 
 interface LoginProps {
   onLogin: (userData: any) => void;
+  onClose?: () => void;
 }
 
-export const Login: React.FC<LoginProps> = ({ onLogin }) => {
+export const Login: React.FC<LoginProps> = ({ onLogin, onClose }) => {
   const { connectGoogle, authError } = useFirebase();
   const [googleLoading, setGoogleLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -22,7 +23,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
       const emailLower = String(fbUser.email || "").trim().toLowerCase();
       if (!isBootstrappedAdminEmail(emailLower)) {
         setErrorMsg(
-          `Akses ditolak. Database Firebase hanya dapat diakses oleh ${BOOTSTRAPPED_ADMIN_EMAIL}.`,
+          `Akses admin ditolak. Perubahan & pengelolaan database hanya dapat dilakukan oleh ${BOOTSTRAPPED_ADMIN_EMAIL}.`,
         );
         return;
       }
@@ -37,6 +38,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
         user: emailLower,
         level: "5",
         email: emailLower,
+        isPublic: false,
       });
     } catch (err: any) {
       setErrorMsg(
@@ -49,15 +51,15 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
   };
 
   return (
-    <div className="bg-[#fbf8ff] font-sans text-[#181a2c] min-h-screen flex flex-col justify-between relative overflow-hidden">
+    <div className="bg-[#fbf8ff]/95 backdrop-blur-md font-sans text-[#181a2c] min-h-screen flex flex-col justify-between relative overflow-hidden">
       <div className="absolute -top-24 -left-24 w-96 h-96 bg-[#154be2]/5 rounded-full blur-3xl pointer-events-none"></div>
       <div className="absolute top-1/2 -right-32 w-80 h-80 bg-cyan-400/5 rounded-full blur-3xl pointer-events-none"></div>
 
       <main className="flex-grow flex items-center justify-center p-6 z-10">
         <div className="w-full max-w-[420px]">
-          <div className="flex flex-col items-center mb-10 text-center">
+          <div className="flex flex-col items-center mb-8 text-center">
             <div className="mb-3 flex items-center justify-center transform hover:scale-105 transition-transform duration-300">
-              <AdvantaLogo className="h-24 w-auto object-contain" />
+              <AdvantaLogo className="h-20 w-auto object-contain" />
             </div>
             <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-[#154be2] to-cyan-500 bg-clip-text text-transparent font-sans">
               RADAR
@@ -67,16 +69,28 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
             </p>
           </div>
 
-          <div className="bg-white/80 backdrop-blur-xl rounded-[28px] p-8 shadow-[0_20px_50px_rgba(21,75,226,0.08)] border border-white">
-            <div className="mb-6">
+          <div className="bg-white/90 backdrop-blur-xl rounded-[28px] p-8 shadow-[0_20px_50px_rgba(21,75,226,0.12)] border border-white relative">
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="absolute top-5 right-5 size-8 rounded-full bg-slate-100 hover:bg-slate-200 text-[#434655] flex items-center justify-center transition-colors cursor-pointer"
+                title="Kembali ke Tampilan Publik"
+              >
+                <span className="material-symbols-outlined text-[18px]">close</span>
+              </button>
+            )}
+
+            <div className="mb-6 pr-6">
               <h2 className="text-xl font-bold text-[#181a2c]">
-                Masuk ke Database Firebase
+                Akun Admin (Opsional)
               </h2>
               <p className="text-xs text-[#747687] mt-1">
-                Akses database dikunci khusus untuk akun{" "}
+                Dashboard dapat diakses &amp; diedit oleh semua pengunjung tanpa login. Masuk opsional dengan akun{" "}
                 <span className="font-mono font-bold text-[#181a2c]">
                   {BOOTSTRAPPED_ADMIN_EMAIL}
                 </span>
+                .
               </p>
             </div>
 
@@ -111,10 +125,20 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
             </button>
 
             <div className="mt-5 p-3.5 rounded-2xl bg-[#f4f2ff]/80 border border-[#e0e0fa] text-[11px] text-[#434655] leading-relaxed">
-              Seluruh data ditarik langsung secara real-time dari Firebase Firestore{" "}
-              <span className="font-mono font-semibold text-[#181a2c]">radaradv-95dbf</span>.
-              Akun lain tidak memiliki izin baca atau tulis ke database.
+              Semua pengunjung dapat membaca, menginput, dan mengedit data di{" "}
+              <span className="font-mono font-semibold text-[#181a2c]">radaradv-95dbf</span>{" "}
+              tanpa perlu login.
             </div>
+
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="w-full mt-3 py-2.5 rounded-xl text-xs font-semibold text-[#635b6e] hover:bg-[#f4f2ff] transition-colors cursor-pointer"
+              >
+                Lanjutkan Tanpa Login
+              </button>
+            )}
           </div>
         </div>
       </main>

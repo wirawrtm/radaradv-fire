@@ -1117,27 +1117,21 @@ export const TempTab: React.FC<TempTabProps> = ({
         return;
       }
 
-      if (isAuthorizedFirebase && firebaseUser) {
-        const snapshot = buildNormalizedCollections({
-          employees,
-          kiosks,
-          workingRows: sourceWorking,
-          drSalesRows: drSalesData || [],
-        });
-        const res = await saveUploadedDrToFirestore(firebaseUser, parsed, snapshot);
-        setDrUploadStats({
-          total: parsed.length,
-          matchedExisting: matchedExisting,
-          autoCreatedPartner: res.createdPartners,
-        });
-        showToast(
-          `Berhasil upload ${res.uploadedCount} DR langsung ke Firestore (${matchedExisting} partner existing · ${res.createdPartners} partner baru).`,
-        );
-      } else {
-        throw new Error(
-          "Akses ditolak. Masuk terlebih dahulu menggunakan akun villatama11@gmail.com untuk menyimpan ke Firestore.",
-        );
-      }
+      const snapshot = buildNormalizedCollections({
+        employees,
+        kiosks,
+        workingRows: sourceWorking,
+        drSalesRows: drSalesData || [],
+      });
+      const res = await saveUploadedDrToFirestore(firebaseUser, parsed, snapshot);
+      setDrUploadStats({
+        total: parsed.length,
+        matchedExisting: matchedExisting,
+        autoCreatedPartner: res.createdPartners,
+      });
+      showToast(
+        `Berhasil upload ${res.uploadedCount} DR langsung ke Firestore (${matchedExisting} partner existing · ${res.createdPartners} partner baru).`,
+      );
     } catch (err: any) {
       console.error("Failed to upload DR spreadsheet:", err);
       showToast(err?.message || "Gagal membaca/menyimpan file Excel/CSV DR.");
@@ -1348,13 +1342,11 @@ export const TempTab: React.FC<TempTabProps> = ({
       <div className="bg-gradient-to-r from-[#154be2]/[0.06] via-white to-emerald-50/70 p-4 rounded-2xl border border-[#154be2]/15 flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div className="space-y-0.5">
           <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-primary text-[18px]">
-              {isAuthorizedFirebase ? "cloud_done" : "cloud_off"}
+            <span className="material-symbols-outlined text-emerald-600 text-[18px]">
+              cloud_done
             </span>
             <h2 className="text-xs font-bold text-[#181a2c] uppercase tracking-wider">
-              {isAuthorizedFirebase
-                ? "Firestore Live Sync Aktif (Akses Tunggal)"
-                : "Menunggu Autentikasi Firebase"}
+              Firestore Live Sync Aktif (Akses Terbuka Tanpa Login)
             </h2>
           </div>
           <p className="text-[11px] text-[#434655]">
@@ -1362,59 +1354,38 @@ export const TempTab: React.FC<TempTabProps> = ({
               ? migrationStage
               : isLoadingFirestore
                 ? "Menarik data real-time dari Firestore..."
-                : isAuthorizedFirebase && firebaseUser
-                  ? hasFirestoreData
-                    ? `Terhubung sebagai ${firebaseUser.email} · Data ditarik real-time dari Firebase Firestore.`
-                    : `Terhubung sebagai ${firebaseUser.email} · Database Firestore kosong (0 dokumen). Siap menerima input atau upload Excel DR.`
-                  : "Silakan masuk menggunakan akun villatama11@gmail.com untuk mengakses database Firestore."}
+                : hasFirestoreData
+                  ? "Terhubung ke Firebase Firestore (radaradv-95dbf) · Semua pengunjung dapat membaca & mengedit tanpa login."
+                  : "Terhubung ke Firebase Firestore (radaradv-95dbf) · Database kosong (0 dokumen). Siap menerima input atau upload Excel DR tanpa login."}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 shrink-0">
-          {!isAuthorizedFirebase ? (
+          <button
+            type="button"
+            disabled={isLoadingFirestore || isMigrating}
+            onClick={async () => {
+              try {
+                await reloadFromFirestore();
+                showToast("Data terbaru berhasil ditarik dari Firebase Firestore.");
+              } catch (err: any) {
+                showToast(err?.message || "Gagal memuat ulang data dari Firestore.");
+              }
+            }}
+            className="h-9 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
+          >
+            <span className="material-symbols-outlined text-[16px]">sync</span>
+            {isLoadingFirestore ? "Memuat..." : "Muat Ulang dari Firestore"}
+          </button>
+          {isAuthorizedFirebase && (
             <button
               type="button"
               disabled={isMigrating}
-              onClick={async () => {
-                try {
-                  await connectGoogle();
-                  showToast("Berhasil terhubung ke Firestore sebagai villatama11@gmail.com.");
-                } catch (err: any) {
-                  showToast(err?.message || "Gagal menghubungkan Firebase.");
-                }
-              }}
-              className="h-9 px-4 rounded-xl bg-[#154be2] hover:bg-[#154be2]/90 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
+              onClick={() => disconnectGoogle()}
+              className="h-9 px-3 rounded-xl bg-white border border-[#e0e0fa] hover:bg-red-50 hover:text-red-600 text-[#434655] text-xs font-semibold cursor-pointer"
             >
-              <span className="material-symbols-outlined text-[16px]">verified_user</span>
-              Masuk Google (villatama11@gmail.com)
+              Putuskan
             </button>
-          ) : (
-            <>
-              <button
-                type="button"
-                disabled={isLoadingFirestore || isMigrating}
-                onClick={async () => {
-                  try {
-                    await reloadFromFirestore();
-                    showToast("Data terbaru berhasil ditarik dari Firebase Firestore.");
-                  } catch (err: any) {
-                    showToast(err?.message || "Gagal memuat ulang data dari Firestore.");
-                  }
-                }}
-                className="h-9 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
-              >
-                <span className="material-symbols-outlined text-[16px]">sync</span>
-                {isLoadingFirestore ? "Memuat..." : "Muat Ulang dari Firestore"}
-              </button>
-              <button
-                type="button"
-                disabled={isMigrating}
-                onClick={() => disconnectGoogle()}
-                className="h-9 px-3 rounded-xl bg-white border border-[#e0e0fa] hover:bg-red-50 hover:text-red-600 text-[#434655] text-xs font-semibold cursor-pointer"
-              >
-                Putuskan
-              </button>
-            </>
           )}
           <button
             type="button"
@@ -1451,8 +1422,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                 firestore.rules (Siap Paste ke Firebase Console → Firestore → Rules)
               </h3>
               <p className="text-[11px] text-[#434655] mt-0.5">
-                Akses Database Tunggal:{" "}
-                <span className="font-mono font-semibold text-[#181a2c]">villatama11@gmail.com</span>
+                Akses Terbuka (Baca, Input &amp; Edit Tanpa Login) &middot; Validasi Schema &amp; Integritas Relasi Aktif
               </p>
             </div>
             <div className="flex items-center gap-2">

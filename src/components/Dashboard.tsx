@@ -50,6 +50,7 @@ import {
   upsertEmployeeFirestore,
   upsertPartnerFirestore,
 } from "../services/firestoreDb";
+import firestoreRulesText from "../../firestore.rules?raw";
 
 const OverviewTab = lazy(() => import("./tabs/OverviewTab"));
 const HomeTab = lazy(() => import("./tabs/HomeTab"));
@@ -63,6 +64,7 @@ const Dashboard = ({
   userData,
   activeTab,
   onLogout,
+  onOpenAdminLogin,
   onUserSwitch,
   setUserData,
   setActiveTab,
@@ -82,7 +84,7 @@ const Dashboard = ({
   setFilterBelowArea,
   filterBelowCrop,
   setFilterBelowCrop,
-}) => {
+}: any) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -135,12 +137,16 @@ const Dashboard = ({
   const [isFetchingData, setIsFetchingData] = useState(true);
   const {
     firebaseUser,
+    isAuthReady,
     isAuthorizedFirebase,
+    firestoreReadError,
     firestoreDataset,
     firestoreAccessRules,
     isLoadingFirestore,
     reloadFromFirestore,
+    retryFirestoreSync,
   } = useFirebase();
+  const [copiedBannerRules, setCopiedBannerRules] = useState(false);
 
   const [employees, setEmployees] = useState<any[]>([]);
   const [isEmployeesLoading, setIsEmployeesLoading] = useState(false);
@@ -219,6 +225,7 @@ const Dashboard = ({
 
   const isBusinessAnalyst = useMemo(() => {
     if (!userData) return false;
+    if (userData.isPublic) return true;
     const posClean = userData.position ? cleanForMatch(userData.position) : "";
     const nameClean = cleanForMatch(userData.name || "");
     const userClean = cleanForMatch(userData.user || "");
@@ -487,33 +494,11 @@ const Dashboard = ({
       console.error('Failed to save access rules', e);
     }
     try {
-      if (isAuthorizedFirebase && firebaseUser) {
-        await saveAccessRulesFirestore(firebaseUser, filteredRules);
-        setAccessSaveSuccess(true);
-      } else {
-        const resp = await customFetch(SCRIPT_URL, {
-          method: "POST",
-          headers: { "Content-Type": "text/plain" },
-          body: JSON.stringify({
-            action: "saveAccessRules",
-            rules: filteredRules
-          })
-        });
-
-        const contentType = resp.headers.get("content-type");
-        if (!resp.ok || !contentType || !contentType.includes("application/json")) {
-          throw new Error("Respon server tidak valid. Pastikan backend sudah terkonfigurasi.");
-        }
-
-        const res = await resp.json();
-        if (res.status === "success") {
-          setAccessSaveSuccess(true);
-        } else {
-          console.error("Failed to save access rules to spreadsheet", res.message);
-        }
-      }
-    } catch (err) {
+      await saveAccessRulesFirestore(firebaseUser, filteredRules);
+      setAccessSaveSuccess(true);
+    } catch (err: any) {
       console.error("Error saving access rules:", err);
+      alert(err?.message || "Gagal menyimpan aturan akses ke Firestore.");
     } finally {
       setIsSavingAccess(false);
       setTimeout(() => setAccessSaveSuccess(false), 3000);
@@ -689,6 +674,7 @@ const Dashboard = ({
     const userClean = cleanForMatch(userData.user || "");
     const numLevel = userData.level ? parseInt(String(userData.level).trim(), 10) : NaN;
     const isBusinessAnalyst =
+      Boolean(userData?.isPublic) ||
       posClean === "businessanalyst" ||
       posClean === "analyst" ||
       myNameClean === "adityawiratama" ||
@@ -1010,27 +996,11 @@ const Dashboard = ({
 
   useEffect(() => {
     if (!userData) return;
-    if (employeesRefreshKey === 0 || isAuthorizedFirebase) {
+    if (employeesRefreshKey === 0 || isAuthReady || isAuthorizedFirebase) {
       return;
     }
-    setIsEmployeesLoading(true);
-    customFetch(`${SCRIPT_URL}?action=getEmployees`)
-      .then((res) => res.json())
-      .then((res) => {
-        if (res.status === "success" && Array.isArray(res.data)) {
-          setEmployees(res.data);
-        } else {
-          setEmployees([]);
-        }
-      })
-      .catch((err) => {
-        console.warn("Error fetching getEmployees:", err);
-        setEmployees([]);
-      })
-      .finally(() => {
-        setIsEmployeesLoading(false);
-      });
-  }, [userData, employeesRefreshKey, isAuthorizedFirebase]);
+    setIsEmployeesLoading(false);
+  }, [userData, employeesRefreshKey, isAuthReady, isAuthorizedFirebase]);
 
   useEffect(() => {
     if (employees && employees.length > 0) {
@@ -1201,6 +1171,7 @@ const Dashboard = ({
     const userClean = cleanForMatch(userData.user || "");
     const numLevel = userData.level ? parseInt(String(userData.level).trim(), 10) : NaN;
     const isBusinessAnalyst =
+      Boolean(userData?.isPublic) ||
       posClean === "businessanalyst" ||
       posClean === "analyst" ||
       nameClean === "adityawiratama" ||
@@ -1389,7 +1360,7 @@ const Dashboard = ({
         combinedData = presetData;
         combinedDrSales = presetDrSales;
         success = true;
-      } else if (isAuthorizedFirebase) {
+      } else {
         const latestDataset = await reloadFromFirestore();
         if (latestDataset) {
           const hydrated = hydrateDashboardFromNormalized(latestDataset);
@@ -1398,52 +1369,6 @@ const Dashboard = ({
           combinedData = hydrated.workingData;
           combinedDrSales = hydrated.drSalesData;
           success = true;
-        }
-      } else {
-        try {
-          const [resp, respDr] = await Promise.all([
-            customFetch(
-              `${SCRIPT_URL}?action=getWorkingData&user=${encodeURIComponent(userData.name)}`,
-            ),
-            customFetch(
-              `${SCRIPT_URL}?action=getDrSalesData&user=${encodeURIComponent(userData.name)}`,
-            ),
-          ]);
-          const [res, resDr] = await Promise.all([resp.json(), respDr.json()]);
-
-          if (res.status === "success") {
-            combinedData = (res.data || []).map((item) => {
-              const cropVal =
-                item.crops ||
-                item.Crops ||
-                item.crop ||
-                item.Crop ||
-                item.CROP ||
-                item.CROPS ||
-                "Uncategorized Crops";
-              const areaVal = item.area || item.Area || item.AREA;
-              const catVal =
-                item.category ||
-                item.Category ||
-                item.CATEGORY ||
-                item.kategori ||
-                item.Kategori ||
-                item.klasifikasi ||
-                item.cat ||
-                item.Cat ||
-                "";
-              return { ...item, crops: cropVal, area: areaVal, category: catVal };
-            });
-            success = true;
-          }
-          if (resDr.status === "success") {
-            combinedDrSales = resDr.data || [];
-          }
-        } catch (apiErr) {
-          console.warn(
-            "API working/sales data load failed, falling back offline:",
-            apiErr,
-          );
         }
       }
 
@@ -1563,7 +1488,7 @@ const Dashboard = ({
 
   useEffect(() => {
     const fetchChannels = async () => {
-      if (channelsRefreshKey === 0 || isAuthorizedFirebase) {
+      if (channelsRefreshKey === 0 || isAuthReady || isAuthorizedFirebase) {
         if (kiosks.length > 0) {
           if (isBusinessAnalyst) {
             setSelectedKiosk("Not Applicable for Business Analyst");
@@ -1582,47 +1507,25 @@ const Dashboard = ({
         setIsChannelsLoading(false);
         return;
       }
-      setIsChannelsLoading(true);
-      try {
-        let fetchedKiosks: any[] = [];
-        const resp = await customFetch(
-          `${SCRIPT_URL}?action=getChannels&user=${encodeURIComponent(userData.name)}`,
-        );
-        const res = await resp.json();
-        if (res.status === "success" && Array.isArray(res.data)) {
-          fetchedKiosks = res.data;
-        }
-        setKiosks(fetchedKiosks);
-
-        if (isBusinessAnalyst) {
-          setSelectedKiosk("Not Applicable for Business Analyst");
-        } else {
-          const myKiosksData = fetchedKiosks.filter((k) =>
-            matchNames(k.pic, userData.name),
-          );
-          if (myKiosksData.length > 0) setSelectedKiosk(myKiosksData[0].name);
-          else if (fetchedKiosks.length > 0)
-            setSelectedKiosk(fetchedKiosks[0].name);
-          else setSelectedKiosk("No Channel Assigned");
-        }
-      } catch (e) {
-        console.warn("Error loading channels", e);
-        setKiosks([]);
-      } finally {
-        setIsChannelsLoading(false);
-      }
+      setIsChannelsLoading(false);
     };
     fetchChannels();
-  }, [userData.name, userData.position, channelsRefreshKey, isBusinessAnalyst, isAuthorizedFirebase]);
+  }, [userData.name, userData.position, channelsRefreshKey, isBusinessAnalyst, isAuthReady, isAuthorizedFirebase, kiosks]);
 
-  // Live real-time hydration directly from Firestore (including empty database)
+  // Live real-time hydration directly from Firestore (supports both Public Read-Only & Authorized Admin)
   useEffect(() => {
-    if (!isAuthorizedFirebase) return;
+    if (!isAuthReady) return;
     if (!firestoreDataset) {
       if (isLoadingFirestore) {
         setIsEmployeesLoading(true);
         setIsChannelsLoading(true);
         setIsFetchingData(true);
+      } else if (firestoreReadError) {
+        setEmployees([]);
+        setKiosks([]);
+        fetchWorkingData([], []);
+        setIsEmployeesLoading(false);
+        setIsChannelsLoading(false);
       }
       return;
     }
@@ -1641,19 +1544,7 @@ const Dashboard = ({
     fetchWorkingData(hydrated.workingData, hydrated.drSalesData);
     setIsEmployeesLoading(false);
     setIsChannelsLoading(false);
-  }, [isAuthorizedFirebase, isLoadingFirestore, firestoreDataset, firestoreAccessRules]);
-
-  useEffect(() => {
-    if (!userData) return;
-    if (isAuthorizedFirebase) return;
-
-    // Without authorized Firebase login, ensure clean empty state (no dummy rows)
-    setEmployees([]);
-    setKiosks([]);
-    fetchWorkingData([], []);
-    setIsEmployeesLoading(false);
-    setIsChannelsLoading(false);
-  }, [userData.name, isAuthorizedFirebase]);
+  }, [isAuthReady, isLoadingFirestore, firestoreReadError, firestoreDataset, firestoreAccessRules]);
 
   useEffect(() => {
     if (teamMembers.length > 1) {
@@ -2105,44 +1996,18 @@ const Dashboard = ({
     setIsFetchingData(true);
     setIsSyncing(true);
     try {
-      if (isAuthorizedFirebase && firebaseUser) {
-        await saveBatchActivityToFirestore(firebaseUser, {
-          kioskName: selectedKiosk,
-          checkerName: userData.name,
-          items: currentKioskItems,
-          currentDataset: normalizedSnapshot,
-        });
-        setConsolidationSuccessMsg("Aktivitas opname berhasil disimpan ke Firestore!");
-        setTimeout(() => setConsolidationSuccessMsg(""), 4000);
-        setIsFetchingData(false);
-        setIsSyncing(false);
-        return;
-      }
-
-      const resp = await customFetch(SCRIPT_URL, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain" },
-        body: JSON.stringify({
-          action: "batchActivity",
-          user: userData.name,
-          kiosk: selectedKiosk,
-          area: userData.area,
-          items: currentKioskItems, // Kirim semua data yang terlihat di layer (dan yg status 'habis')
-        }),
+      await saveBatchActivityToFirestore(firebaseUser, {
+        kioskName: selectedKiosk,
+        checkerName: userData.name,
+        items: currentKioskItems,
+        currentDataset: normalizedSnapshot,
       });
-      const res = await resp.json();
-      if (res.status === "error") {
-        console.error("Batch activity failed:", res.message);
-        alert("Upload activity gagal: " + res.message);
-      } else {
-        alert("Upload activity berhasil!");
-      }
-      fetchWorkingData();
-    } catch (e) {
-      console.warn(
-        "Activity sync failed, using offline fallback capabilities:",
-        e,
-      );
+      setConsolidationSuccessMsg("Aktivitas opname berhasil disimpan ke Firestore!");
+      setTimeout(() => setConsolidationSuccessMsg(""), 4000);
+    } catch (e: any) {
+      console.error("Activity sync failed:", e);
+      alert("Gagal menyimpan aktivitas ke Firestore: " + (e?.message || "Periksa Firestore Rules."));
+    } finally {
       setIsFetchingData(false);
       setIsSyncing(false);
     }
@@ -2248,121 +2113,47 @@ const Dashboard = ({
     try {
       const isAdd = !id || additionalData.isAdd;
 
-      if (isAuthorizedFirebase && firebaseUser) {
-        const matchedPartner = !isAdd
-          ? normalizedSnapshot.partners.find(
-              (p) =>
-                p.doc_id === String(id) ||
-                cleanForMatch(p.partner_name) ===
-                  cleanForMatch(additionalData.originalName || additionalData.name || ""),
-            )
-          : undefined;
-        const picEmp = normalizedSnapshot.employees.find(
-          (e) =>
-            cleanForMatch(e.full_name) === cleanForMatch(newPic || "") ||
-            cleanForMatch(e.username) === cleanForMatch(newPic || ""),
-        );
-        const docId =
-          matchedPartner?.doc_id ||
-          (isAdd
-            ? padFsId("PRT", normalizedSnapshot.partners.length + 1, 3)
-            : toValidDocId(String(id)));
-        const divGroup = String(additionalData.group || userData?.group || "")
-          .toLowerCase()
-          .includes("veg")
-          ? ("Vegetables" as const)
-          : ("Field Corn" as const);
+      const matchedPartner = !isAdd
+        ? normalizedSnapshot.partners.find(
+            (p) =>
+              p.doc_id === String(id) ||
+              cleanForMatch(p.partner_name) ===
+                cleanForMatch(additionalData.originalName || additionalData.name || ""),
+          )
+        : undefined;
+      const picEmp = normalizedSnapshot.employees.find(
+        (e) =>
+          cleanForMatch(e.full_name) === cleanForMatch(newPic || "") ||
+          cleanForMatch(e.username) === cleanForMatch(newPic || ""),
+      );
+      const docId =
+        matchedPartner?.doc_id ||
+        (isAdd
+          ? padFsId("PRT", normalizedSnapshot.partners.length + 1, 3)
+          : toValidDocId(String(id)));
+      const divGroup = String(additionalData.group || userData?.group || "")
+        .toLowerCase()
+        .includes("veg")
+        ? ("Vegetables" as const)
+        : ("Field Corn" as const);
 
-        await upsertPartnerFirestore(
-          firebaseUser,
-          {
-            doc_id: docId,
-            partner_name: additionalData.name || matchedPartner?.partner_name || docId,
-            category: additionalData.category || matchedPartner?.category || "R1",
-            pic_employee_id: picEmp ? picEmp.doc_id : null,
-            pic_name: picEmp?.full_name || String(newPic || ""),
-            division_group: divGroup,
-            province: additionalData.province || userData?.province || "-",
-            area: additionalData.province || userData?.area || "-",
-          },
-          isAdd || !matchedPartner,
-        );
-        setPartnerEditModal({ isOpen: false, item: null });
-        setConsolidationSuccessMsg("Data partner berhasil disimpan ke Firestore.");
-        setTimeout(() => setConsolidationSuccessMsg(""), 4000);
-        return;
-      }
-
-      const payload = {
-        action: isAdd ? "addPartner" : "updatePartner",
-        id: id || "partner_" + Date.now(),
-        pic: newPic,
-        name: additionalData.name || "",
-        originalName: additionalData.originalName || "",
-        originalPic: additionalData.originalPic || "",
-        originalProvince: additionalData.originalProvince || "",
-        originalGroup: additionalData.originalGroup || "",
-        originalCategory: additionalData.originalCategory || "",
-        category: additionalData.category || "",
-        user: userData.name,
-        group: additionalData.group || userData?.group || "",
-        province: additionalData.province || userData?.province || "",
-      };
-
-      const resp = await customFetch(SCRIPT_URL, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain" },
-        body: JSON.stringify(payload),
-      });
-
-      const contentType = resp.headers.get("content-type");
-      if (!resp.ok || !contentType || !contentType.includes("application/json")) {
-        throw new Error("Respon server tidak valid. Pastikan backend sudah terkonfigurasi.");
-      }
-
-      const res = await resp.json();
-      if (res.status === "success") {
-        if (isAdd) {
-          const newPartner = {
-            id: res.id || payload.id,
-            name: payload.name,
-            category: payload.category,
-            pic: payload.pic,
-            upline: "",
-            province: payload.province,
-            area: payload.province,
-            group: payload.group,
-          };
-          setKiosks((prev) => [...prev, newPartner]);
-        } else {
-          setKiosks((prev) =>
-            prev.map((k) => {
-              const matchesId = Boolean(id) && String(k.id) === String(id);
-              const matchesName = cleanForMatch(k.name) === cleanForMatch(payload.originalName || payload.name);
-              if (matchesId || matchesName) {
-                return {
-                  ...k,
-                  name: payload.name || k.name,
-                  category: payload.category || k.category,
-                  pic: payload.pic || k.pic,
-                  province: payload.province || k.province || "",
-                  area: payload.province || k.area || "",
-                  group: payload.group || k.group || "",
-                };
-              }
-              return k;
-            }),
-          );
-          if (payload.category) {
-            setMappingCategory(payload.category);
-          }
-        }
-        setPartnerEditModal({ isOpen: false, item: null });
-        setChannelsRefreshKey((prev) => prev + 1);
-        alert(res.message || "Partner berhasil disimpan");
-      } else {
-        alert("Gagal simpan partner: " + (res.message || "Unknown error"));
-      }
+      await upsertPartnerFirestore(
+        firebaseUser,
+        {
+          doc_id: docId,
+          partner_name: additionalData.name || matchedPartner?.partner_name || docId,
+          category: additionalData.category || matchedPartner?.category || "R1",
+          pic_employee_id: picEmp ? picEmp.doc_id : null,
+          pic_name: picEmp?.full_name || String(newPic || ""),
+          division_group: divGroup,
+          province: additionalData.province || userData?.province || "-",
+          area: additionalData.province || userData?.area || "-",
+        },
+        isAdd || !matchedPartner,
+      );
+      setPartnerEditModal({ isOpen: false, item: null });
+      setConsolidationSuccessMsg("Data partner berhasil disimpan ke Firestore.");
+      setTimeout(() => setConsolidationSuccessMsg(""), 4000);
     } catch (e: any) {
       console.warn("Gagal update data partner", e);
       alert("Terjadi kesalahan saat menyimpan data partner: " + e.message);
@@ -2377,72 +2168,21 @@ const Dashboard = ({
       return;
     }
     const targetName = partnerDeleteModal.item.name;
-    const targetPic = partnerDeleteModal.item.pic || "";
     const targetId = partnerDeleteModal.item.id || partnerDeleteModal.item.doc_id;
-    const targetProvince = partnerDeleteModal.item.province || partnerDeleteModal.item.area || "";
-    const targetGroup = partnerDeleteModal.item.group || "";
-    const targetCategory = partnerDeleteModal.item.category || "";
 
     setIsActionLoading(true);
     try {
-      if (isAuthorizedFirebase && firebaseUser) {
-        const matched = normalizedSnapshot.partners.find(
-          (p) =>
-            p.doc_id === String(targetId) ||
-            cleanForMatch(p.partner_name) === cleanForMatch(targetName),
-        );
-        if (matched) {
-          await deletePartnerFirestore(matched.doc_id);
-        }
-        setPartnerDeleteModal({ isOpen: false, item: null });
-        setConsolidationSuccessMsg("Partner berhasil dihapus dari Firestore.");
-        setTimeout(() => setConsolidationSuccessMsg(""), 4000);
-        return;
+      const matched = normalizedSnapshot.partners.find(
+        (p) =>
+          p.doc_id === String(targetId) ||
+          cleanForMatch(p.partner_name) === cleanForMatch(targetName),
+      );
+      if (matched) {
+        await deletePartnerFirestore(matched.doc_id);
       }
-
-      console.log("[Delete] Sending request to:", SCRIPT_URL);
-      const resp = await customFetch(SCRIPT_URL, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain" },
-        body: JSON.stringify({
-          action: "deletePartner",
-          id: targetId,
-          name: targetName,
-          pic: targetPic,
-          originalProvince: targetProvince,
-          originalGroup: targetGroup,
-          originalCategory: targetCategory,
-          user: userData.name,
-        }),
-      });
-
-      const contentType = resp.headers.get("content-type");
-      if (!resp.ok || !contentType || !contentType.includes("application/json")) {
-        const text = await resp.text();
-        console.error("Non-JSON response from server:", text);
-        throw new Error("Server tidak memberikan respon JSON yang valid. Pastikan backend sudah terkonfigurasi.");
-      }
-
-      const res = await resp.json();
-      if (res.status === "success") {
-        setKiosks((prev) =>
-          prev.filter((k) => {
-            if (targetId && k.id) {
-              return String(k.id) !== String(targetId);
-            }
-            const matchName = String(k.name).trim().toLowerCase() === String(targetName).trim().toLowerCase();
-            const matchPic = String(k.pic || "").trim().toLowerCase() === String(targetPic || "").trim().toLowerCase();
-            const matchProvince = String(k.province || k.area || "").trim().toLowerCase() === String(targetProvince).trim().toLowerCase();
-            const matchGroup = String(k.group || "").trim().toLowerCase() === String(targetGroup).trim().toLowerCase();
-            return !(matchName && matchPic && matchProvince && matchGroup);
-          })
-        );
-        setPartnerDeleteModal({ isOpen: false, item: null });
-        setChannelsRefreshKey((prev) => prev + 1);
-        alert(res.message || "Partner berhasil dihapus");
-      } else {
-        alert("Gagal hapus partner: " + (res.message || "Unknown error"));
-      }
+      setPartnerDeleteModal({ isOpen: false, item: null });
+      setConsolidationSuccessMsg("Partner berhasil dihapus dari Firestore.");
+      setTimeout(() => setConsolidationSuccessMsg(""), 4000);
     } catch (e) {
       console.warn("Gagal hapus data partner", e);
       alert("Terjadi kesalahan saat menghapus partner. Silakan coba lagi.");
@@ -2459,94 +2199,51 @@ const Dashboard = ({
     if (!isAdd && !originalName) return;
     setIsActionLoading(true);
     try {
-      if (isAuthorizedFirebase && firebaseUser) {
-        const existingEmp = !isAdd
-          ? normalizedSnapshot.employees.find(
-              (e) => cleanForMatch(e.full_name) === cleanForMatch(originalName),
-            )
-          : undefined;
-        const uplineEmp = normalizedSnapshot.employees.find(
-          (e) => cleanForMatch(e.full_name) === cleanForMatch(updatedFields.upline || ""),
-        );
-        const docId =
-          existingEmp?.doc_id ||
-          padFsId("EMP", normalizedSnapshot.employees.length + 1, 3);
-        const divGroup = String(updatedFields.group || existingEmp?.division_group || "")
-          .toLowerCase()
-          .includes("veg")
-          ? ("Vegetables" as const)
-          : ("Field Corn" as const);
-        const pos = String(updatedFields.position || existingEmp?.position || "Business Solution");
-        const roleLevel = Number(updatedFields.level) || existingEmp?.role_level || 1;
+      const existingEmp = !isAdd
+        ? normalizedSnapshot.employees.find(
+            (e) => cleanForMatch(e.full_name) === cleanForMatch(originalName),
+          )
+        : undefined;
+      const uplineEmp = normalizedSnapshot.employees.find(
+        (e) => cleanForMatch(e.full_name) === cleanForMatch(updatedFields.upline || ""),
+      );
+      const docId =
+        existingEmp?.doc_id ||
+        padFsId("EMP", normalizedSnapshot.employees.length + 1, 3);
+      const divGroup = String(updatedFields.group || existingEmp?.division_group || "")
+        .toLowerCase()
+        .includes("veg")
+        ? ("Vegetables" as const)
+        : ("Field Corn" as const);
+      const pos = String(updatedFields.position || existingEmp?.position || "Business Solution");
+      const roleLevel = Number(updatedFields.level) || existingEmp?.role_level || 1;
 
-        await upsertEmployeeFirestore(
-          firebaseUser,
-          {
-            doc_id: docId,
-            username: String(updatedFields.user || existingEmp?.username || "").toLowerCase(),
-            full_name: updatedFields.name || existingEmp?.full_name || docId,
-            position: pos,
-            role_level: Math.min(5, Math.max(1, roleLevel)),
-            upline_id: uplineEmp ? uplineEmp.doc_id : null,
-            subordinate_ids: existingEmp?.subordinate_ids || [],
-            access_scope_ids: existingEmp?.access_scope_ids || [docId],
-            division_group: divGroup,
-            province: updatedFields.province || existingEmp?.province || "-",
-            area: updatedFields.area || updatedFields.province || existingEmp?.area || "-",
-            status: String(updatedFields.status || "").toLowerCase().includes("non")
-              ? "Nonaktif"
-              : "Aktif",
-          },
-          isAdd || !existingEmp,
-        );
-        setEmployeeEditModal({ isOpen: false, item: null });
-        setConsolidationSuccessMsg("Data karyawan berhasil disimpan ke Firestore.");
-        setTimeout(() => setConsolidationSuccessMsg(""), 4000);
-        return;
-      }
-
-      const resp = await customFetch(SCRIPT_URL, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain" },
-        body: JSON.stringify({
-          action: "updateEmployee",
-          originalName: isAdd ? "" : originalName,
-          ...updatedFields,
-        }),
-      });
-
-      const contentType = resp.headers.get("content-type");
-      if (!resp.ok || !contentType || !contentType.includes("application/json")) {
-        throw new Error("Respon server tidak valid. Pastikan backend sudah terkonfigurasi.");
-      }
-
-      const res = await resp.json();
-      if (res.status === "success") {
-        if (isAdd) {
-          setEmployees((prev) => [...prev, { ...updatedFields }]);
-        } else {
-          if (
-            userData &&
-            cleanForMatch(userData.name) === cleanForMatch(originalName)
-          ) {
-            setUserData((prev) =>
-              prev ? { ...prev, ...updatedFields } : null,
-            );
-          }
-          setEmployees((prev) =>
-            prev.map((emp) => {
-              if (cleanForMatch(emp.name) === cleanForMatch(originalName)) {
-                return { ...emp, ...updatedFields };
-              }
-              return emp;
-            }),
-          );
-        }
-        setEmployeeEditModal({ isOpen: false, item: null });
-        setEmployeesRefreshKey((prev) => prev + 1);
-      }
-    } catch (e) {
+      await upsertEmployeeFirestore(
+        firebaseUser,
+        {
+          doc_id: docId,
+          username: String(updatedFields.user || existingEmp?.username || "").toLowerCase(),
+          full_name: updatedFields.name || existingEmp?.full_name || docId,
+          position: pos,
+          role_level: Math.min(5, Math.max(1, roleLevel)),
+          upline_id: uplineEmp ? uplineEmp.doc_id : null,
+          subordinate_ids: existingEmp?.subordinate_ids || [],
+          access_scope_ids: existingEmp?.access_scope_ids || [docId],
+          division_group: divGroup,
+          province: updatedFields.province || existingEmp?.province || "-",
+          area: updatedFields.area || updatedFields.province || existingEmp?.area || "-",
+          status: String(updatedFields.status || "").toLowerCase().includes("non")
+            ? "Nonaktif"
+            : "Aktif",
+        },
+        isAdd || !existingEmp,
+      );
+      setEmployeeEditModal({ isOpen: false, item: null });
+      setConsolidationSuccessMsg("Data karyawan berhasil disimpan ke Firestore.");
+      setTimeout(() => setConsolidationSuccessMsg(""), 4000);
+    } catch (e: any) {
       console.warn("Gagal update data karyawan", e);
+      alert("Gagal menyimpan data karyawan ke Firestore: " + (e?.message || "Periksa Firestore Rules."));
     } finally {
       setIsActionLoading(false);
     }
@@ -2556,52 +2253,20 @@ const Dashboard = ({
     if (!employeeDeleteModal.item?.name) return;
     setIsActionLoading(true);
     try {
-      if (isAuthorizedFirebase && firebaseUser) {
-        const existingEmp = normalizedSnapshot.employees.find(
-          (e) =>
-            cleanForMatch(e.full_name) === cleanForMatch(employeeDeleteModal.item?.name) ||
-            e.doc_id === String(employeeDeleteModal.item?.doc_id || ""),
-        );
-        if (existingEmp) {
-          await deleteEmployeeFirestore(existingEmp.doc_id);
-        }
-        setEmployeeDeleteModal({ isOpen: false, item: null });
-        setConsolidationSuccessMsg("Karyawan berhasil dihapus dari Firestore.");
-        setTimeout(() => setConsolidationSuccessMsg(""), 4000);
-        return;
+      const existingEmp = normalizedSnapshot.employees.find(
+        (e) =>
+          cleanForMatch(e.full_name) === cleanForMatch(employeeDeleteModal.item?.name) ||
+          e.doc_id === String(employeeDeleteModal.item?.doc_id || ""),
+      );
+      if (existingEmp) {
+        await deleteEmployeeFirestore(existingEmp.doc_id);
       }
-
-      const resp = await customFetch(SCRIPT_URL, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain" },
-        body: JSON.stringify({
-          action: "deleteEmployee",
-          name: employeeDeleteModal.item.name,
-        }),
-      });
-
-      const contentType = resp.headers.get("content-type");
-      if (!resp.ok || !contentType || !contentType.includes("application/json")) {
-        throw new Error("Respon server tidak valid. Pastikan backend sudah terkonfigurasi.");
-      }
-
-      const res = await resp.json();
-      if (res.status === "success") {
-        setEmployees((prev) =>
-          prev.filter(
-            (emp) =>
-              cleanForMatch(emp.name) !==
-              cleanForMatch(employeeDeleteModal.item?.name),
-          ),
-        );
-        setEmployeeDeleteModal({ isOpen: false, item: null });
-        setEmployeesRefreshKey((prev) => prev + 1);
-        alert(res.message || "Employee berhasil dihapus");
-      } else {
-        alert("Gagal hapus employee: " + (res.message || "Unknown error"));
-      }
-    } catch (e) {
+      setEmployeeDeleteModal({ isOpen: false, item: null });
+      setConsolidationSuccessMsg("Karyawan berhasil dihapus dari Firestore.");
+      setTimeout(() => setConsolidationSuccessMsg(""), 4000);
+    } catch (e: any) {
       console.warn("Gagal hapus data karyawan", e);
+      alert("Gagal menghapus data karyawan dari Firestore: " + (e?.message || "Periksa Firestore Rules."));
     } finally {
       setIsActionLoading(false);
     }
@@ -6140,10 +5805,14 @@ const Dashboard = ({
               onClick={(e) => {
                 e.stopPropagation();
                 e.preventDefault();
-                setIsLogoutModalOpen(true);
+                if (isAuthorizedFirebase) {
+                  setIsLogoutModalOpen(true);
+                }
               }}
-              className="absolute inset-0 flex items-center justify-center opacity-10 cursor-pointer hover:opacity-15 active:opacity-20 transition-opacity"
-              title="Klik untuk Keluar"
+              className={`absolute inset-0 flex items-center justify-center opacity-10 transition-opacity ${
+                isAuthorizedFirebase ? "cursor-pointer hover:opacity-15 active:opacity-20" : "pointer-events-none"
+              }`}
+              title={isAuthorizedFirebase ? "Klik untuk Keluar Akun" : undefined}
             >
               <UserIcon className="h-[260%] w-auto max-w-none object-contain object-center" />
             </div>
@@ -6151,29 +5820,31 @@ const Dashboard = ({
 
           <div className="flex-1 relative z-10 min-w-0 pr-2 flex flex-col gap-2">
             <div className="flex flex-col gap-1.5">
-              <div className="flex items-center gap-3">
-                {greeting.imageUrl && (
-                  <img
-                    src={greeting.imageUrl}
-                    referrerPolicy="no-referrer"
-                    className="size-12 md:size-14 object-contain opacity-100 shrink-0 pointer-events-none select-none animate-rotate-sway"
-                    alt=""
-                  />
-                )}
-                <div className="flex-1 min-w-0 py-0.5">
-                  <p className="text-[9px] text-white/80 font-semibold uppercase tracking-widest leading-none mb-0.5">
-                    {greeting.text},
-                  </p>
-                  <h2 className="text-md md:text-lg font-bold text-white leading-tight truncate">
-                    {userData.name}
-                  </h2>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-3 min-w-0">
+                  {greeting.imageUrl && (
+                    <img
+                      src={greeting.imageUrl}
+                      referrerPolicy="no-referrer"
+                      className="size-12 md:size-14 object-contain opacity-100 shrink-0 pointer-events-none select-none animate-rotate-sway"
+                      alt=""
+                    />
+                  )}
+                  <div className="flex-1 min-w-0 py-0.5">
+                    <p className="text-[9px] text-white/80 font-semibold uppercase tracking-widest leading-none mb-0.5">
+                      {greeting.text},
+                    </p>
+                    <h2 className="text-md md:text-lg font-bold text-white leading-tight truncate">
+                      {isAuthorizedFirebase ? userData.name : "RADAR Advanta"}
+                    </h2>
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-[10px] md:text-xs font-bold text-white uppercase bg-white/20 px-2.5 py-1 rounded-full border border-white/20 backdrop-blur-sm truncate select-none">
-                  {userData.position}
+                  {isAuthorizedFirebase ? userData.position : "Akses Terbuka · Edit Aktif"}
                 </span>
-                {userData.province && userData.province !== "-" && (
+                {isAuthorizedFirebase && userData.province && userData.province !== "-" && (
                   <span className="text-[10px] md:text-xs font-bold text-white/80 uppercase bg-white/10 px-2.5 py-1 rounded-full border border-white/10 backdrop-blur-sm">
                     {userData.province}
                   </span>
@@ -6183,6 +5854,64 @@ const Dashboard = ({
           </div>
         </div>
       </div>
+
+      {firestoreReadError && (
+        <div className="mb-6 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5 text-xs">
+            <span className="material-symbols-outlined text-amber-600 text-lg shrink-0 mt-0.5">
+              warning
+            </span>
+            <div>
+              <p className="font-bold">Firestore Rules (`radaradv-95dbf`) Perlu Dipublikasikan</p>
+              <p className="text-amber-800 mt-0.5">
+                {firestoreReadError} Salin{" "}
+                <span className="font-mono font-semibold">firestore.rules</span> terbaru, lalu paste &amp; klik{" "}
+                <span className="font-semibold">Publish</span> di Firebase Console &rarr; Firestore Database &rarr; Rules agar semua dapat mengakses &amp; mengedit tanpa login.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(firestoreRulesText);
+                  } else {
+                    const ta = document.createElement("textarea");
+                    ta.value = firestoreRulesText;
+                    ta.style.position = "fixed";
+                    ta.style.left = "-9999px";
+                    document.body.appendChild(ta);
+                    ta.focus();
+                    ta.select();
+                    document.execCommand("copy");
+                    document.body.removeChild(ta);
+                  }
+                  setCopiedBannerRules(true);
+                  setTimeout(() => setCopiedBannerRules(false), 2500);
+                } catch {
+                  // ignore clipboard failure
+                }
+              }}
+              className="px-3.5 py-2 rounded-xl bg-white border border-amber-300 hover:bg-amber-100 text-amber-900 text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[14px]">
+                {copiedBannerRules ? "check" : "content_copy"}
+              </span>
+              {copiedBannerRules ? "Tersalin!" : "Copy Rules"}
+            </button>
+            <button
+              type="button"
+              onClick={() => retryFirestoreSync()}
+              className="px-3.5 py-2 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-900 text-[11px] font-bold uppercase tracking-wider flex items-center gap-1 cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[14px]">refresh</span>
+              Muat Ulang
+            </button>
+          </div>
+        </div>
+      )}
 
       <Suspense
         fallback={
@@ -6304,6 +6033,7 @@ const Dashboard = ({
             allCategories={allCategories}
             availableGroups={availableGroups}
             accessRules={accessRules}
+            canEdit={true}
           />
         )}
 
