@@ -243,10 +243,10 @@ export function subscribeToFirestoreCollections(
  */
 async function commitInChunks(
   ops: Array<{
-    type: "create" | "update";
+    type: "create" | "update" | "delete";
     colName: string;
     docId: string;
-    data: Record<string, any>;
+    data?: Record<string, any>;
   }>,
   chunkSize = 6,
 ) {
@@ -265,14 +265,16 @@ async function commitInChunks(
         const batch = writeBatch(db);
         slice.forEach((op) => {
           const ref = doc(db, op.colName, op.docId);
-          if (op.type === "create") {
+          if (op.type === "delete") {
+            batch.delete(ref);
+          } else if (op.type === "create") {
             batch.set(ref, {
-              ...op.data,
+              ...(op.data || {}),
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
             });
           } else {
-            const updatePayload = { ...op.data };
+            const updatePayload = { ...(op.data || {}) };
             delete updatePayload.doc_id;
             delete updatePayload.ownerUid;
             delete updatePayload.createdAt;
@@ -285,8 +287,15 @@ async function commitInChunks(
         try {
           await batch.commit();
         } catch (err) {
-          const samplePath = slice[0] ? `${slice[0].colName}/${slice[0].docId}` : "batch";
-          handleFirestoreError(err, OperationType.WRITE, samplePath);
+          const sampleOp = slice[0];
+          const samplePath = sampleOp ? `${sampleOp.colName}/${sampleOp.docId}` : "batch";
+          const opType =
+            sampleOp?.type === "delete"
+              ? OperationType.DELETE
+              : sampleOp?.type === "update"
+                ? OperationType.UPDATE
+                : OperationType.WRITE;
+          handleFirestoreError(err, opType, samplePath);
         }
       }),
     );
@@ -1749,4 +1758,338 @@ export async function bulkAddEmployeesFirestore(
   if (ops.length === 0) throw new Error("Isi minimal 1 Nama Lengkap Employee.");
   await commitInChunks(ops, 15);
   return createdCreds;
+}
+
+/**
+ * Bulk delete documents from any of the 6 operational collections in Firestore.
+ */
+export async function bulkDeleteCollectionDocsFirestore(
+  colName: "opname_logs" | "dr_shipments" | "lots" | "hybrids" | "partners" | "employees",
+  docIds: string[],
+): Promise<number> {
+  const uniqueIds = Array.from(
+    new Set(docIds.map((id) => toValidDocId(id, "")).filter(Boolean)),
+  );
+  if (uniqueIds.length === 0) throw new Error("Tidak ada dokumen valid untuk dihapus.");
+
+  const ops = uniqueIds.map((docId) => ({
+    type: "delete" as const,
+    colName,
+    docId,
+  }));
+  await commitInChunks(ops, 15);
+  return ops.length;
+}
+
+/**
+ * Bulk update existing Hybrid documents in Firestore /hybrids.
+ */
+export async function bulkUpdateHybridsFirestore(
+  rows: Array<{ doc_id: string; hybrid_name: string; crop_type: "Field Corn" | "Vegetables" }>,
+): Promise<number> {
+  const ops = rows
+    .filter((r) => toValidDocId(r.doc_id, "") && clampStr(r.hybrid_name, 100))
+    .map((r) => ({
+      type: "update" as const,
+      colName: "hybrids",
+      docId: toValidDocId(r.doc_id),
+      data: {
+        hybrid_name: clampStr(String(r.hybrid_name).toUpperCase(), 100),
+        crop_type: toStrictDivision(r.crop_type),
+      },
+    }));
+
+  if (ops.length === 0) throw new Error("Isi nama hybrid yang valid untuk disimpan.");
+  await commitInChunks(ops, 15);
+  return ops.length;
+}
+
+/**
+ * Bulk update existing Lot documents in Firestore /lots.
+ */
+export async function bulkUpdateLotsFirestore(
+  rows: Array<{
+    doc_id: string;
+    hybrid_id: string | null;
+    shipping_date: string;
+    exp_date: string;
+    initial_dr_kg: number;
+  }>,
+): Promise<number> {
+  const ops = rows
+    .filter((r) => toValidDocId(r.doc_id, ""))
+    .map((r) => {
+      const lotId = toValidDocId(r.doc_id);
+      const numDr = Number(r.initial_dr_kg);
+      return {
+        type: "update" as const,
+        colName: "lots",
+        docId: lotId,
+        data: {
+          hybrid_id: r.hybrid_id ? toValidDocId(r.hybrid_id) : null,
+          shipping_date: clampStr(toIsoDateStr(r.shipping_date), 20),
+          exp_date: clampStr(toIsoDateStr(r.exp_date || extractExpFromLot(lotId)), 20),
+          initial_dr_kg: Number.isFinite(numDr) && numDr >= 0 ? numDr : 0,
+        },
+      };
+    });
+
+  if (ops.length === 0) throw new Error("Tidak ada data Lot valid untuk diperbarui.");
+  await commitInChunks(ops, 15);
+  return ops.length;
+}
+
+/**
+ * Bulk update existing DR Shipment documents in Firestore /dr_shipments.
+ */
+export async function bulkUpdateDrShipmentsFirestore(
+  user: User | null | undefined,
+  rows: Array<{
+    doc_id: string;
+    shipping_date: string;
+    partner_id: string | null;
+    lot_no: string;
+    exp_date: string;
+    shipped_qty_kg: number;
+  }>,
+  existingLots: LotFsDoc[],
+): Promise<number> {
+  const ownerUid = user?.uid || "public";
+  const existingLotIds = new Set(existingLots.map((l) => toValidDocId(l.doc_id)));
+  const newLotOps = new Map<string, any>();
+  const drOps: any[] = [];
+
+  for (const r of rows) {
+    const docId = toValidDocId(r.doc_id, "");
+    const lotNo = toValidDocId(String(r.lot_no || "").toUpperCase(), "");
+    if (!docId || !lotNo) continue;
+
+    const shippingDate = clampStr(
+      toIsoDateStr(r.shipping_date) || new Date().toISOString().slice(0, 10),
+      20,
+      "2026-01-01",
+    );
+    const expDate = clampStr(toIsoDateStr(r.exp_date || extractExpFromLot(lotNo)), 20);
+    const numQty = Number(r.shipped_qty_kg);
+    const qtyKg = Number.isFinite(numQty) && numQty >= 0 ? numQty : 0;
+
+    if (!existingLotIds.has(lotNo) && !newLotOps.has(lotNo)) {
+      newLotOps.set(lotNo, {
+        type: "create" as const,
+        colName: "lots",
+        docId: lotNo,
+        data: {
+          doc_id: lotNo,
+          hybrid_id: null,
+          shipping_date: shippingDate,
+          exp_date: expDate,
+          initial_dr_kg: qtyKg,
+          ownerUid,
+        },
+      });
+    }
+
+    drOps.push({
+      type: "update" as const,
+      colName: "dr_shipments",
+      docId,
+      data: {
+        shipping_date: shippingDate,
+        partner_id: r.partner_id ? toValidDocId(r.partner_id) : null,
+        lot_no: lotNo,
+        exp_date: expDate,
+        shipped_qty_kg: qtyKg,
+      },
+    });
+  }
+
+  if (drOps.length === 0) throw new Error("Nomor Lot wajib diisi pada DR Shipment yang diedit.");
+  if (newLotOps.size > 0) await commitInChunks(Array.from(newLotOps.values()), 15);
+  await commitInChunks(drOps, 15);
+  return drOps.length;
+}
+
+/**
+ * Bulk update existing Opname Log documents in Firestore /opname_logs.
+ */
+export async function bulkUpdateOpnameLogsFirestore(
+  user: User | null | undefined,
+  rows: Array<{
+    doc_id: string;
+    partner_id: string | null;
+    lot_no: string;
+    checker_id: string | null;
+    crop_year: string;
+    months: Partial<Record<(typeof FISCAL_MONTH_COLS)[number]["key"], MonthlyOpnameCell | null>>;
+  }>,
+  existingLots: LotFsDoc[],
+): Promise<number> {
+  const ownerUid = user?.uid || "public";
+  const existingLotIds = new Set(existingLots.map((l) => toValidDocId(l.doc_id)));
+  const newLotOps = new Map<string, any>();
+  const logOps: any[] = [];
+
+  for (const r of rows) {
+    const docId = toValidDocId(r.doc_id, "");
+    const lotNo = toValidDocId(String(r.lot_no || "").toUpperCase(), "");
+    if (!docId || !lotNo) continue;
+
+    if (!existingLotIds.has(lotNo) && !newLotOps.has(lotNo)) {
+      newLotOps.set(lotNo, {
+        type: "create" as const,
+        colName: "lots",
+        docId: lotNo,
+        data: {
+          doc_id: lotNo,
+          hybrid_id: null,
+          shipping_date: "",
+          exp_date: clampStr(toIsoDateStr(extractExpFromLot(lotNo)), 20),
+          initial_dr_kg: 0,
+          ownerUid,
+        },
+      });
+    }
+
+    const updateData: Record<string, any> = {
+      partner_id: r.partner_id ? toValidDocId(r.partner_id) : null,
+      lot_no: lotNo,
+      checker_id: r.checker_id ? toValidDocId(r.checker_id) : null,
+      crop_year: clampStr(r.crop_year || "FY2026", 12, "FY2026"),
+    };
+
+    FISCAL_MONTH_COLS.forEach(({ key }) => {
+      const cell = r.months[key];
+      updateData[key] = cell
+        ? {
+            in: Math.max(0, Number(cell.in) || 0),
+            idle: Math.max(0, Number(cell.idle) || 0),
+            pog: Math.max(0, Number(cell.pog) || 0),
+          }
+        : null;
+    });
+
+    logOps.push({
+      type: "update" as const,
+      colName: "opname_logs",
+      docId,
+      data: updateData,
+    });
+  }
+
+  if (logOps.length === 0) throw new Error("Nomor Lot wajib diisi pada Opname Log yang diedit.");
+  if (newLotOps.size > 0) await commitInChunks(Array.from(newLotOps.values()), 15);
+  await commitInChunks(logOps, 10);
+  return logOps.length;
+}
+
+/**
+ * Bulk update existing Partner documents in Firestore /partners.
+ */
+export async function bulkUpdatePartnersFirestore(
+  rows: Array<{
+    doc_id: string;
+    partner_name: string;
+    category: string;
+    pic_employee_id: string | null;
+    division_group: "Field Corn" | "Vegetables";
+    province: string;
+    area: string;
+  }>,
+  existingEmployees: EmployeeFsDoc[],
+): Promise<number> {
+  const empById = new Map(existingEmployees.map((e) => [toValidDocId(e.doc_id), e]));
+  const ops = rows
+    .filter((r) => toValidDocId(r.doc_id, "") && clampStr(r.partner_name, 160))
+    .map((r) => {
+      const docId = toValidDocId(r.doc_id);
+      const picId = r.pic_employee_id ? toValidDocId(r.pic_employee_id) : null;
+      const picEmp = picId ? empById.get(picId) : undefined;
+      return {
+        type: "update" as const,
+        colName: "partners",
+        docId,
+        data: {
+          partner_name: clampStr(r.partner_name, 160),
+          category: clampStr(r.category || "R1", 40),
+          pic_employee_id: picId,
+          pic_name: clampStr(picEmp?.full_name || "", 120),
+          division_group: toStrictDivision(r.division_group),
+          province: clampStr(r.province, 80, "-"),
+          area: clampStr(r.area || r.province, 80, "-"),
+        },
+      };
+    });
+
+  if (ops.length === 0) throw new Error("Nama Partner wajib diisi.");
+  await commitInChunks(ops, 15);
+  return ops.length;
+}
+
+/**
+ * Bulk update existing Employee documents in Firestore /employees.
+ */
+export async function bulkUpdateEmployeesFirestore(
+  rows: Array<{
+    doc_id: string;
+    username: string;
+    full_name: string;
+    position: string;
+    role_level: number;
+    upline_id: string | null;
+    subordinate_ids?: string[];
+    access_scope_ids?: string[];
+    division_group: "Field Corn" | "Vegetables" | "All";
+    province: string;
+    area: string;
+    status?: "Aktif" | "Nonaktif";
+    password?: string;
+  }>,
+): Promise<Array<{ doc_id: string; username: string; password?: string }>> {
+  const ops: any[] = [];
+  const updatedCreds: Array<{ doc_id: string; username: string; password?: string }> = [];
+
+  for (const r of rows) {
+    const docId = toValidDocId(r.doc_id, "");
+    const fullName = clampStr(r.full_name, 120);
+    if (!docId || !fullName) continue;
+
+    const username = clampStr(String(r.username || "").toLowerCase(), 80);
+    const divGroup = r.division_group === "All" ? "All" : toStrictDivision(r.division_group);
+    const roleLevel = Math.min(5, Math.max(1, Math.round(Number(r.role_level) || 1)));
+    const subIds = (r.subordinate_ids || []).map((id) => toValidDocId(id)).slice(0, 200);
+    const scopeIds = (r.access_scope_ids && r.access_scope_ids.length > 0
+      ? r.access_scope_ids
+      : [docId, ...subIds]
+    )
+      .map((id) => toValidDocId(id))
+      .slice(0, 200);
+
+    ops.push({
+      type: "update" as const,
+      colName: "employees",
+      docId,
+      data: {
+        username,
+        full_name: fullName,
+        position: clampStr(r.position || "Business Solution", 100, "Business Solution"),
+        role_level: roleLevel,
+        upline_id: r.upline_id ? toValidDocId(r.upline_id) : null,
+        subordinate_ids: subIds,
+        access_scope_ids: scopeIds,
+        division_group: divGroup,
+        province: clampStr(r.province, 80, "-"),
+        area: clampStr(r.area || r.province, 80, "-"),
+        status: r.status === "Nonaktif" ? "Nonaktif" : "Aktif",
+      },
+    });
+    updatedCreds.push({
+      doc_id: docId,
+      username,
+      password: r.password,
+    });
+  }
+
+  if (ops.length === 0) throw new Error("Nama Lengkap Employee wajib diisi.");
+  await commitInChunks(ops, 15);
+  return updatedCreds;
 }

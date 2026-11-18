@@ -14,6 +14,13 @@ import {
   bulkAddLotsFirestore,
   bulkAddOpnameLogsFirestore,
   bulkAddPartnersFirestore,
+  bulkDeleteCollectionDocsFirestore,
+  bulkUpdateDrShipmentsFirestore,
+  bulkUpdateEmployeesFirestore,
+  bulkUpdateHybridsFirestore,
+  bulkUpdateLotsFirestore,
+  bulkUpdateOpnameLogsFirestore,
+  bulkUpdatePartnersFirestore,
   saveUploadedDrToFirestore,
 } from "../../services/firestoreDb";
 import firestoreRulesText from "../../../firestore.rules?raw";
@@ -304,14 +311,14 @@ export const TempTab: React.FC<TempTabProps> = ({
 
   // 1. COLLECTION: employees (doc_id: EMP-xxx — Login Auth, 2 Divisi Sales, & Downline Hierarchy)
   const { employeesCol, empByClean, empById } = useMemo(() => {
-    const tempIdByClean = new Map<string, string>();
-    (employees || []).forEach((e, idx) => {
-      const docId = e.doc_id ? String(e.doc_id) : padId("EMP", idx + 1, 3);
-      const cn = cleanForMatch(e.name || "");
-      const cu = cleanForMatch(e.user || "");
-      if (cn) tempIdByClean.set(cn, docId);
-      if (cu) tempIdByClean.set(cu, docId);
-    });
+    const readPwdMap = (): Record<string, string> => {
+      try {
+        return JSON.parse(localStorage.getItem("radar_emp_passwords") || "{}");
+      } catch {
+        return {};
+      }
+    };
+    const pwdMap = readPwdMap();
 
     const getRoleLevel = (posRaw: string, rawLvl: any): number => {
       const p = String(posRaw || "").toLowerCase();
@@ -325,33 +332,112 @@ export const TempTab: React.FC<TempTabProps> = ({
       return Number(rawLvl) || 1;
     };
 
-    const baseDocs = (employees || []).map((e, idx) => {
-      const doc_id = e.doc_id ? String(e.doc_id) : padId("EMP", idx + 1, 3);
-      const uplineClean = cleanForMatch(e.upline || "");
-      const upline_id =
-        uplineClean && tempIdByClean.has(uplineClean) ? tempIdByClean.get(uplineClean)! : null;
-      const position = String(e.position || "Business Solution").trim();
-      const role_level = getRoleLevel(position, e.level);
-      const rawGroup = String(e.group || e.division_group || position).trim().toLowerCase();
-      const division_group: "Field Corn" | "Vegetables" | "All" =
-        rawGroup === "all" ? "All" : toStrictDivision(e.group || position);
+    let baseDocs: Array<{
+      doc_id: string;
+      username: string;
+      password: string;
+      full_name: string;
+      position: string;
+      role_level: number;
+      upline_id: string | null;
+      subordinate_ids: string[];
+      access_scope_ids: string[];
+      division_group: "Field Corn" | "Vegetables" | "All";
+      province: string;
+      area: string;
+      status: "Aktif" | "Nonaktif";
+      _raw: any;
+    }>;
 
-      return {
-        doc_id,
-        username: String(e.user || e.email || "").trim().toLowerCase(),
-        password: String(e.password || "123").trim(),
-        full_name: String(e.name || "").trim(),
-        position,
-        role_level,
-        upline_id,
-        subordinate_ids: [] as string[],
-        access_scope_ids: [] as string[],
-        division_group,
-        province: String(e.province || "-").trim(),
-        area: String(e.area || e.province || "-").trim(),
-        _raw: e,
-      };
-    });
+    if (firestoreDataset) {
+      const rawById = new Map<string, any>();
+      (employees || []).forEach((e) => {
+        if (e.doc_id) rawById.set(String(e.doc_id), e);
+      });
+
+      baseDocs = firestoreDataset.employees.map((e) => {
+        const position = String(e.position || "Business Solution").trim();
+        const role_level = getRoleLevel(position, e.role_level);
+        const division_group: "Field Corn" | "Vegetables" | "All" =
+          String(e.division_group || "").trim().toLowerCase() === "all"
+            ? "All"
+            : toStrictDivision(e.division_group || position);
+        const uname = String(e.username || "").trim().toLowerCase();
+        const resolvedPwd = pwdMap[e.doc_id] || pwdMap[uname] || e._password || "123";
+        const matchedRaw = rawById.get(e.doc_id) || {
+          doc_id: e.doc_id,
+          name: e.full_name,
+          user: uname,
+          email: e.picEmail || uname.toUpperCase(),
+          position,
+          level: String(role_level),
+          upline_id: e.upline_id,
+          group: division_group,
+          province: e.province,
+          area: e.area,
+          status: e.status,
+          password: resolvedPwd,
+        };
+        return {
+          doc_id: e.doc_id,
+          username: uname,
+          password: resolvedPwd,
+          full_name: String(e.full_name || "").trim(),
+          position,
+          role_level,
+          upline_id: e.upline_id || null,
+          subordinate_ids: [],
+          access_scope_ids: [],
+          division_group,
+          province: String(e.province || "-").trim(),
+          area: String(e.area || e.province || "-").trim(),
+          status: e.status === "Nonaktif" ? "Nonaktif" : "Aktif",
+          _raw: matchedRaw,
+        };
+      });
+    } else {
+      const tempIdByClean = new Map<string, string>();
+      (employees || []).forEach((e, idx) => {
+        const docId = e.doc_id ? String(e.doc_id) : padId("EMP", idx + 1, 3);
+        const cn = cleanForMatch(e.name || "");
+        const cu = cleanForMatch(e.user || "");
+        if (cn) tempIdByClean.set(cn, docId);
+        if (cu) tempIdByClean.set(cu, docId);
+      });
+
+      baseDocs = (employees || []).map((e, idx) => {
+        const doc_id = e.doc_id ? String(e.doc_id) : padId("EMP", idx + 1, 3);
+        const uplineClean = cleanForMatch(e.upline || "");
+        const upline_id = e.upline_id
+          ? String(e.upline_id)
+          : uplineClean && tempIdByClean.has(uplineClean)
+            ? tempIdByClean.get(uplineClean)!
+            : null;
+        const position = String(e.position || "Business Solution").trim();
+        const role_level = getRoleLevel(position, e.level);
+        const rawGroup = String(e.group || e.division_group || position).trim().toLowerCase();
+        const division_group: "Field Corn" | "Vegetables" | "All" =
+          rawGroup === "all" ? "All" : toStrictDivision(e.group || position);
+        const uname = String(e.user || e.email || "").trim().toLowerCase();
+
+        return {
+          doc_id,
+          username: uname,
+          password: pwdMap[doc_id] || pwdMap[uname] || String(e.password || "123").trim(),
+          full_name: String(e.name || "").trim(),
+          position,
+          role_level,
+          upline_id,
+          subordinate_ids: [] as string[],
+          access_scope_ids: [] as string[],
+          division_group,
+          province: String(e.province || "-").trim(),
+          area: String(e.area || e.province || "-").trim(),
+          status: String(e.status || "").toLowerCase().includes("non") ? "Nonaktif" : "Aktif",
+          _raw: e,
+        };
+      });
+    }
 
     // Build Downline Tree (BFS) per Divisi (Field Corn / Vegetables)
     const childrenByUpline = new Map<string, string[]>();
@@ -364,7 +450,6 @@ export const TempTab: React.FC<TempTabProps> = ({
     });
 
     const docs = baseDocs.map((d) => {
-      // Admin / Super User (Lv.5): jika division_group === "All", mencakup semua divisi
       if (d.role_level >= 5) {
         const divSubs = baseDocs
           .filter(
@@ -380,7 +465,6 @@ export const TempTab: React.FC<TempTabProps> = ({
         };
       }
 
-      // Sales (Lv.1 Business Solution s/d Lv.4 Sales Manager): melihat seluruh bawahan (under) di divisinya
       const subs: string[] = [];
       const visited = new Set<string>([d.doc_id]);
       const queue = [...(childrenByUpline.get(d.doc_id) || [])];
@@ -411,10 +495,42 @@ export const TempTab: React.FC<TempTabProps> = ({
       if (d.username) lookup.set(cleanForMatch(d.username), d);
     });
     return { employeesCol: docs, empByClean: lookup, empById: byId };
-  }, [employees]);
+  }, [firestoreDataset, employees]);
 
   // 2. COLLECTION: partners (doc_id: PRT-xxx)
   const { partnersCol, partnerByClean } = useMemo(() => {
+    if (firestoreDataset) {
+      const kioskById = new Map<string, any>();
+      (kiosks || []).forEach((k) => {
+        if (k.doc_id) kioskById.set(String(k.doc_id), k);
+      });
+
+      const docs = firestoreDataset.partners.map((p) => ({
+        doc_id: p.doc_id,
+        partner_name: p.partner_name,
+        category: p.category,
+        pic_employee_id: p.pic_employee_id || null,
+        division_group: toStrictDivision(p.division_group),
+        province: p.province || "-",
+        area: p.area || "-",
+        _raw:
+          kioskById.get(p.doc_id) || {
+            id: p.doc_id,
+            doc_id: p.doc_id,
+            name: p.partner_name,
+            category: p.category,
+            pic: p.pic_name || "",
+            pic_employee_id: p.pic_employee_id,
+            province: p.province,
+            area: p.area,
+            group: p.division_group,
+          },
+      }));
+      const lookup = new Map<string, (typeof docs)[0]>();
+      docs.forEach((d) => lookup.set(cleanForMatch(d.partner_name), d));
+      return { partnersCol: docs, partnerByClean: lookup };
+    }
+
     const seen = new Set<string>();
     const docs: Array<{
       doc_id: string;
@@ -451,8 +567,6 @@ export const TempTab: React.FC<TempTabProps> = ({
     (kiosks || []).forEach((k) => {
       registerPartner(k.name, k.category, k.pic, k.province, k.area, k.group, k);
     });
-
-    // Auto-register any partner referenced in working or DR so foreign keys are 100% referentially intact
     sourceWorking.forEach((w) => {
       registerPartner(w.kiosk || w.channel || w.toko, w.category, w.user || w.pic, w.province, w.area, w.crops, w);
     });
@@ -463,10 +577,21 @@ export const TempTab: React.FC<TempTabProps> = ({
     const lookup = new Map<string, (typeof docs)[0]>();
     docs.forEach((d) => lookup.set(cleanForMatch(d.partner_name), d));
     return { partnersCol: docs, partnerByClean: lookup };
-  }, [kiosks, sourceWorking, mergedDrSales, empByClean]);
+  }, [firestoreDataset, kiosks, sourceWorking, mergedDrSales, empByClean]);
 
   // 3. COLLECTION: hybrids (doc_id: HYB-xxx — Hanya Field Corn atau Vegetables)
   const { hybridsCol, hybridByClean } = useMemo(() => {
+    if (firestoreDataset) {
+      const docs = firestoreDataset.hybrids.map((h) => ({
+        doc_id: h.doc_id,
+        hybrid_name: h.hybrid_name,
+        crop_type: toStrictDivision(h.crop_type),
+      }));
+      const lookup = new Map<string, (typeof docs)[0]>();
+      docs.forEach((d) => lookup.set(cleanForMatch(d.hybrid_name), d));
+      return { hybridsCol: docs, hybridByClean: lookup };
+    }
+
     const map = new Map<string, { hybrid_name: string; crop_type: "Field Corn" | "Vegetables" }>();
 
     mergedDrSales.forEach((d) => {
@@ -506,10 +631,30 @@ export const TempTab: React.FC<TempTabProps> = ({
     const lookup = new Map<string, (typeof docs)[0]>();
     docs.forEach((d) => lookup.set(cleanForMatch(d.hybrid_name), d));
     return { hybridsCol: docs, hybridByClean: lookup };
-  }, [mergedDrSales, sourceWorking]);
+  }, [firestoreDataset, mergedDrSales, sourceWorking]);
 
   // 4. COLLECTION: lots (doc_id: lot_no) & 5. COLLECTION: dr_shipments (doc_id: DR-xxx)
   const { lotsCol, drShipmentsCol } = useMemo(() => {
+    if (firestoreDataset) {
+      return {
+        lotsCol: firestoreDataset.lots.map((l) => ({
+          doc_id: l.doc_id,
+          hybrid_id: l.hybrid_id || null,
+          shipping_date: l.shipping_date || "",
+          exp_date: l.exp_date || "",
+          initial_dr_kg: Number(l.initial_dr_kg) || 0,
+        })),
+        drShipmentsCol: firestoreDataset.dr_shipments.map((d) => ({
+          doc_id: d.doc_id,
+          shipping_date: d.shipping_date || "",
+          partner_id: d.partner_id || null,
+          lot_no: d.lot_no || "",
+          exp_date: d.exp_date || "",
+          shipped_qty_kg: Number(d.shipped_qty_kg) || 0,
+        })),
+      };
+    }
+
     const lotMap = new Map<
       string,
       {
@@ -621,10 +766,33 @@ export const TempTab: React.FC<TempTabProps> = ({
       lotsCol: Array.from(lotMap.values()),
       drShipmentsCol: drDocs,
     };
-  }, [mergedDrSales, sourceWorking, partnerByClean, hybridByClean]);
+  }, [firestoreDataset, mergedDrSales, sourceWorking, partnerByClean, hybridByClean]);
 
   // 6. COLLECTION: opname_logs (Riwayat & Saldo Opname Bulanan April -> Maret)
   const opnameLogsCol = useMemo(() => {
+    if (firestoreDataset) {
+      return firestoreDataset.opname_logs.map((l) => ({
+        doc_id: l.doc_id,
+        _key: l.doc_id,
+        partner_id: l.partner_id || null,
+        lot_no: l.lot_no || "",
+        checker_id: l.checker_id || null,
+        crop_year: l.crop_year || "FY2026",
+        apr: l.apr || null,
+        mei: l.mei || null,
+        jun: l.jun || null,
+        jul: l.jul || null,
+        ags: l.ags || null,
+        sep: l.sep || null,
+        okt: l.okt || null,
+        nov: l.nov || null,
+        des: l.des || null,
+        jan: l.jan || null,
+        feb: l.feb || null,
+        mar: l.mar || null,
+      }));
+    }
+
     const invMap = new Map<
       string,
       {
@@ -713,6 +881,7 @@ export const TempTab: React.FC<TempTabProps> = ({
     });
 
     const logs: Array<{
+      doc_id: string;
       _key: string;
       partner_id: string | null;
       lot_no: string;
@@ -738,18 +907,8 @@ export const TempTab: React.FC<TempTabProps> = ({
       let lastIdx = -1;
 
       const monthCells: Record<string, MonthlyOpnameCell | null> = {
-        apr: null,
-        mei: null,
-        jun: null,
-        jul: null,
-        ags: null,
-        sep: null,
-        okt: null,
-        nov: null,
-        des: null,
-        jan: null,
-        feb: null,
-        mar: null,
+        apr: null, mei: null, jun: null, jul: null, ags: null, sep: null,
+        okt: null, nov: null, des: null, jan: null, feb: null, mar: null,
       };
 
       FISCAL_MONTH_COLS.forEach(({ key, mIdx }) => {
@@ -762,12 +921,7 @@ export const TempTab: React.FC<TempTabProps> = ({
         const pogKg = prev !== null && qty < prev ? prev - qty : 0;
         const idleKg = qty;
 
-        monthCells[key] = {
-          in: inKg,
-          idle: idleKg,
-          pog: pogKg,
-        };
-
+        monthCells[key] = { in: inKg, idle: idleKg, pog: pogKg };
         prev = qty;
       });
 
@@ -781,8 +935,10 @@ export const TempTab: React.FC<TempTabProps> = ({
         };
       }
 
+      const logDocId = `${inv.partner_id || "NO_PRT"}_${inv.lot_no}_FY2026`;
       logs.push({
-        _key: `${inv.doc_id}_${inv.partner_id || "NO-PRT"}_${inv.lot_no}`,
+        doc_id: logDocId,
+        _key: logDocId,
         partner_id: inv.partner_id,
         lot_no: inv.lot_no,
         checker_id: inv.last_checker_id,
@@ -803,7 +959,7 @@ export const TempTab: React.FC<TempTabProps> = ({
     });
 
     return logs;
-  }, [sourceWorking, partnerByClean, empByClean]);
+  }, [firestoreDataset, sourceWorking, partnerByClean, empByClean]);
 
   // Fast ID Lookup Maps for Hover Tooltips (so table stays 100% pure DB structure)
   const idTooltipMap = useMemo(() => {
@@ -818,7 +974,7 @@ export const TempTab: React.FC<TempTabProps> = ({
       map[h.doc_id] = `${h.hybrid_name} (${h.crop_type})`;
     });
     lotsCol.forEach((l) => {
-      map[l.doc_id] = `Lot ${l.doc_id} · Hybrid: ${l.hybrid_id} · Exp: ${l.exp_date}`;
+      map[l.doc_id] = `Lot ${l.doc_id} · Hybrid: ${l.hybrid_id || "-"} · Exp: ${l.exp_date}`;
     });
     return map;
   }, [partnersCol, employeesCol, hybridsCol, lotsCol]);
@@ -840,7 +996,6 @@ export const TempTab: React.FC<TempTabProps> = ({
     if (activeLoginEmp) {
       return new Set(activeLoginEmp.access_scope_ids);
     }
-    // Admin Divisi: semua karyawan di divisi efektif + Super User ("All")
     return new Set(
       employeesCol
         .filter((e) => e.division_group === effectiveDivision || e.division_group === "All")
@@ -853,7 +1008,6 @@ export const TempTab: React.FC<TempTabProps> = ({
   const filterAndSortDocs = useCallback(
     <T extends Record<string, any>>(docs: T[], colKey: CollectionKey): T[] => {
       const filtered = docs.filter((doc) => {
-        // 1. Global search
         if (q) {
           const matchesGlobal = Object.entries(doc).some(([k, v]) => {
             if (k === "_raw" || k === "_key") return false;
@@ -868,7 +1022,6 @@ export const TempTab: React.FC<TempTabProps> = ({
           if (!matchesGlobal) return false;
         }
 
-        // 2. Per-column header search
         for (const [k, rawQuery] of Object.entries(colFilters)) {
           if (!k.startsWith(`${colKey}.`)) continue;
           const query = String(rawQuery || "").trim().toLowerCase();
@@ -907,7 +1060,6 @@ export const TempTab: React.FC<TempTabProps> = ({
 
       if (colKey !== activeCollection) return filtered;
 
-      // 3. Active column sorting
       const { field, dir } = sortConfig;
       const mult = dir === "asc" ? 1 : -1;
       const getCellSortNum = (v: any): number | null => {
@@ -949,19 +1101,32 @@ export const TempTab: React.FC<TempTabProps> = ({
     return filterAndSortDocs(scoped, "hybrids");
   }, [hybridsCol, effectiveDivision, filterAndSortDocs]);
 
-  const allowedHybridSet = useMemo(
-    () => new Set(hybridsCol.filter((h) => h.crop_type === effectiveDivision).map((h) => h.doc_id)),
-    [hybridsCol, effectiveDivision],
+  const hybridDivMap = useMemo(
+    () => new Map(hybridsCol.map((h) => [h.doc_id, h.crop_type])),
+    [hybridsCol],
+  );
+
+  const partnerDivMap = useMemo(
+    () => new Map(partnersCol.map((p) => [p.doc_id, p.division_group])),
+    [partnersCol],
   );
 
   const filteredLots = useMemo(() => {
-    const scoped = lotsCol.filter((l) => l.hybrid_id && allowedHybridSet.has(l.hybrid_id));
+    const scoped = lotsCol.filter((l) => {
+      if (!l.hybrid_id || !hybridDivMap.has(l.hybrid_id)) return true;
+      return hybridDivMap.get(l.hybrid_id) === effectiveDivision;
+    });
     return filterAndSortDocs(scoped, "lots");
-  }, [lotsCol, allowedHybridSet, filterAndSortDocs]);
+  }, [lotsCol, hybridDivMap, effectiveDivision, filterAndSortDocs]);
 
   const allowedLotSet = useMemo(
-    () => new Set(lotsCol.filter((l) => l.hybrid_id && allowedHybridSet.has(l.hybrid_id)).map((l) => l.doc_id)),
-    [lotsCol, allowedHybridSet],
+    () =>
+      new Set(
+        lotsCol
+          .filter((l) => !l.hybrid_id || !hybridDivMap.has(l.hybrid_id) || hybridDivMap.get(l.hybrid_id) === effectiveDivision)
+          .map((l) => l.doc_id),
+      ),
+    [lotsCol, hybridDivMap, effectiveDivision],
   );
 
   const scopedPartnersBase = useMemo(() => {
@@ -987,8 +1152,12 @@ export const TempTab: React.FC<TempTabProps> = ({
 
   const filteredLogs = useMemo(() => {
     const scoped = opnameLogsCol.filter((l) => {
-      const inDivision = allowedLotSet.has(l.lot_no);
-      if (!inDivision) return false;
+      if (!allowedLotSet.has(l.lot_no)) return false;
+      const lotObj = lotsCol.find((x) => x.doc_id === l.lot_no);
+      const lotHasHybrid = Boolean(lotObj?.hybrid_id && hybridDivMap.has(lotObj.hybrid_id));
+      if (!lotHasHybrid && l.partner_id && partnerDivMap.has(l.partner_id)) {
+        if (partnerDivMap.get(l.partner_id) !== effectiveDivision) return false;
+      }
       if (!activeLoginEmp) return true;
       return (
         (l.checker_id && allowedEmpSet.has(l.checker_id)) ||
@@ -996,17 +1165,42 @@ export const TempTab: React.FC<TempTabProps> = ({
       );
     });
     return filterAndSortDocs(scoped, "opname_logs");
-  }, [opnameLogsCol, allowedLotSet, activeLoginEmp, allowedEmpSet, allowedPartnerSet, filterAndSortDocs]);
+  }, [
+    opnameLogsCol,
+    allowedLotSet,
+    lotsCol,
+    hybridDivMap,
+    partnerDivMap,
+    effectiveDivision,
+    activeLoginEmp,
+    allowedEmpSet,
+    allowedPartnerSet,
+    filterAndSortDocs,
+  ]);
 
   const filteredDr = useMemo(() => {
     const scoped = drShipmentsCol.filter((d) => {
-      const inDivision = allowedLotSet.has(d.lot_no);
-      if (!inDivision) return false;
+      if (!allowedLotSet.has(d.lot_no)) return false;
+      const lotObj = lotsCol.find((x) => x.doc_id === d.lot_no);
+      const lotHasHybrid = Boolean(lotObj?.hybrid_id && hybridDivMap.has(lotObj.hybrid_id));
+      if (!lotHasHybrid && d.partner_id && partnerDivMap.has(d.partner_id)) {
+        if (partnerDivMap.get(d.partner_id) !== effectiveDivision) return false;
+      }
       if (!activeLoginEmp) return true;
-      return d.partner_id && allowedPartnerSet.has(d.partner_id);
+      return Boolean(d.partner_id && allowedPartnerSet.has(d.partner_id));
     });
     return filterAndSortDocs(scoped, "dr_shipments");
-  }, [drShipmentsCol, allowedLotSet, activeLoginEmp, allowedPartnerSet, filterAndSortDocs]);
+  }, [
+    drShipmentsCol,
+    allowedLotSet,
+    lotsCol,
+    hybridDivMap,
+    partnerDivMap,
+    effectiveDivision,
+    activeLoginEmp,
+    allowedPartnerSet,
+    filterAndSortDocs,
+  ]);
 
   const filteredEmployees = useMemo(() => {
     const scoped = employeesCol.filter(
@@ -1589,6 +1783,413 @@ export const TempTab: React.FC<TempTabProps> = ({
 
   const activeDrafts = inlineDrafts[activeCollection] || [];
 
+  const [inlineEdits, setInlineEdits] = useState<Record<CollectionKey, Record<string, any>>>({
+    opname_logs: {},
+    dr_shipments: {},
+    lots: {},
+    hybrids: {},
+    partners: {},
+    employees: {},
+  });
+  const [selectedRowIds, setSelectedRowIds] = useState<Record<CollectionKey, string[]>>({
+    opname_logs: [],
+    dr_shipments: [],
+    lots: [],
+    hybrids: [],
+    partners: [],
+    employees: [],
+  });
+  const [isSavingEdits, setIsSavingEdits] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    colKey: CollectionKey;
+    docIds: string[];
+    labels: string[];
+  } | null>(null);
+  const [isDeletingRows, setIsDeletingRows] = useState(false);
+
+  const buildEditRowDraft = useCallback((colKey: CollectionKey, row: any) => {
+    if (colKey === "opname_logs") {
+      const months: Record<string, { in: string; idle: string; pog: string }> = {};
+      FISCAL_MONTH_COLS.forEach(({ key }) => {
+        const c = row[key];
+        months[key] = c
+          ? { in: String(c.in ?? 0), idle: String(c.idle ?? 0), pog: String(c.pog ?? 0) }
+          : { in: "", idle: "", pog: "" };
+      });
+      return {
+        doc_id: row.doc_id || row._key,
+        partner_id: row.partner_id || "",
+        lot_no: row.lot_no || "",
+        checker_id: row.checker_id || "",
+        crop_year: row.crop_year || "FY2026",
+        months,
+      };
+    }
+    if (colKey === "dr_shipments") {
+      return {
+        doc_id: row.doc_id,
+        shipping_date: row.shipping_date || "",
+        partner_id: row.partner_id || "",
+        lot_no: row.lot_no || "",
+        exp_date: row.exp_date || "",
+        shipped_qty_kg: String(row.shipped_qty_kg ?? 0),
+      };
+    }
+    if (colKey === "lots") {
+      return {
+        doc_id: row.doc_id,
+        hybrid_id: row.hybrid_id || "",
+        shipping_date: row.shipping_date || "",
+        exp_date: row.exp_date || "",
+        initial_dr_kg: String(row.initial_dr_kg ?? 0),
+      };
+    }
+    if (colKey === "hybrids") {
+      return {
+        doc_id: row.doc_id,
+        hybrid_name: row.hybrid_name || "",
+        crop_type: row.crop_type || "Field Corn",
+      };
+    }
+    if (colKey === "partners") {
+      return {
+        doc_id: row.doc_id,
+        partner_name: row.partner_name || "",
+        category: row.category || "R1",
+        pic_employee_id: row.pic_employee_id || "",
+        division_group: row.division_group || "Field Corn",
+        province: row.province || "",
+        area: row.area || "",
+      };
+    }
+    return {
+      doc_id: row.doc_id,
+      username: row.username || "",
+      password: row.password || "123",
+      full_name: row.full_name || "",
+      position: row.position || "Business Solution",
+      role_level: Number(row.role_level) || 1,
+      upline_id: row.upline_id || "",
+      subordinate_ids: row.subordinate_ids || [],
+      access_scope_ids: row.access_scope_ids || [],
+      division_group: row.division_group || "Field Corn",
+      province: row.province || "",
+      area: row.area || "",
+      status: row.status || "Aktif",
+    };
+  }, []);
+
+  const handleStartEditRow = useCallback(
+    (colKey: CollectionKey, row: any) => {
+      const docId = String(row.doc_id || row._key || "");
+      if (!docId) return;
+      setEditError(null);
+      setViewMode("table");
+      setInlineEdits((prev) => ({
+        ...prev,
+        [colKey]: {
+          ...prev[colKey],
+          [docId]: buildEditRowDraft(colKey, row),
+        },
+      }));
+    },
+    [buildEditRowDraft],
+  );
+
+  const handleStartEditSelected = useCallback(
+    (colKey: CollectionKey, visibleRows: any[]) => {
+      const ids = new Set(selectedRowIds[colKey] || []);
+      if (ids.size === 0) return;
+      setEditError(null);
+      setViewMode("table");
+      setInlineEdits((prev) => {
+        const nextCol = { ...prev[colKey] };
+        visibleRows.forEach((row) => {
+          const docId = String(row.doc_id || row._key || "");
+          if (docId && ids.has(docId) && !nextCol[docId]) {
+            nextCol[docId] = buildEditRowDraft(colKey, row);
+          }
+        });
+        return { ...prev, [colKey]: nextCol };
+      });
+    },
+    [selectedRowIds, buildEditRowDraft],
+  );
+
+  const handleUpdateEditField = useCallback(
+    (colKey: CollectionKey, docId: string, patch: Record<string, any>) => {
+      setInlineEdits((prev) => {
+        const existingRow = prev[colKey]?.[docId];
+        if (!existingRow) return prev;
+        const nextRow = { ...existingRow, ...patch };
+        if (colKey === "dr_shipments" && typeof patch.lot_no === "string") {
+          const upperLot = patch.lot_no.toUpperCase();
+          nextRow.lot_no = upperLot;
+          const matchedLot = lotsCol.find((l) => l.doc_id.toUpperCase() === upperLot.trim());
+          const derived = matchedLot?.exp_date || extractExpFromLot(upperLot);
+          if (derived && derived !== "N/A") nextRow.exp_date = derived;
+        }
+        if (colKey === "employees" && typeof patch.position === "string") {
+          nextRow.role_level = getEmployeeLevelFromPos(patch.position);
+        }
+        return {
+          ...prev,
+          [colKey]: {
+            ...prev[colKey],
+            [docId]: nextRow,
+          },
+        };
+      });
+    },
+    [lotsCol, getEmployeeLevelFromPos],
+  );
+
+  const handleUpdateEditOpnameMonthCell = useCallback(
+    (docId: string, monthKey: string, metric: "in" | "idle" | "pog", val: string) => {
+      setInlineEdits((prev) => {
+        const existingRow = prev.opname_logs?.[docId];
+        if (!existingRow) return prev;
+        return {
+          ...prev,
+          opname_logs: {
+            ...prev.opname_logs,
+            [docId]: {
+              ...existingRow,
+              months: {
+                ...existingRow.months,
+                [monthKey]: {
+                  ...(existingRow.months?.[monthKey] || { in: "", idle: "", pog: "" }),
+                  [metric]: val,
+                },
+              },
+            },
+          },
+        };
+      });
+    },
+    [],
+  );
+
+  const handleCancelEditRow = useCallback((colKey: CollectionKey, docId: string) => {
+    setInlineEdits((prev) => {
+      const nextCol = { ...prev[colKey] };
+      delete nextCol[docId];
+      return { ...prev, [colKey]: nextCol };
+    });
+  }, []);
+
+  const handleClearAllEdits = useCallback((colKey: CollectionKey) => {
+    setEditError(null);
+    setInlineEdits((prev) => ({ ...prev, [colKey]: {} }));
+  }, []);
+
+  const handleSaveEditedRows = useCallback(
+    async (colKey: CollectionKey, targetDocIds?: string[]) => {
+      const editMap = inlineEdits[colKey] || {};
+      const keys = targetDocIds && targetDocIds.length > 0 ? targetDocIds : Object.keys(editMap);
+      const rowsToSave = keys.map((k) => editMap[k]).filter(Boolean);
+      if (rowsToSave.length === 0) return;
+
+      setIsSavingEdits(true);
+      setEditError(null);
+
+      try {
+        const fsLots = firestoreDataset?.lots || [];
+        const fsEmployees = firestoreDataset?.employees || [];
+        let updatedCount = 0;
+
+        if (colKey === "hybrids") {
+          updatedCount = await bulkUpdateHybridsFirestore(
+            rowsToSave.map((r) => ({
+              doc_id: r.doc_id,
+              hybrid_name: r.hybrid_name,
+              crop_type: r.crop_type,
+            })),
+          );
+        } else if (colKey === "lots") {
+          updatedCount = await bulkUpdateLotsFirestore(
+            rowsToSave.map((r) => ({
+              doc_id: r.doc_id,
+              hybrid_id: r.hybrid_id || null,
+              shipping_date: r.shipping_date,
+              exp_date: r.exp_date,
+              initial_dr_kg: Number(r.initial_dr_kg) || 0,
+            })),
+          );
+        } else if (colKey === "dr_shipments") {
+          updatedCount = await bulkUpdateDrShipmentsFirestore(
+            firebaseUser,
+            rowsToSave.map((r) => ({
+              doc_id: r.doc_id,
+              shipping_date: r.shipping_date,
+              partner_id: r.partner_id || null,
+              lot_no: r.lot_no,
+              exp_date: r.exp_date,
+              shipped_qty_kg: Number(r.shipped_qty_kg) || 0,
+            })),
+            fsLots,
+          );
+        } else if (colKey === "opname_logs") {
+          updatedCount = await bulkUpdateOpnameLogsFirestore(
+            firebaseUser,
+            rowsToSave.map((r) => {
+              const parsedMonths: Record<string, MonthlyOpnameCell | null> = {};
+              FISCAL_MONTH_COLS.forEach(({ key }) => {
+                const cell = r.months?.[key];
+                if (
+                  cell &&
+                  (String(cell.in).trim() !== "" ||
+                    String(cell.idle).trim() !== "" ||
+                    String(cell.pog).trim() !== "")
+                ) {
+                  parsedMonths[key] = {
+                    in: Number(cell.in) || 0,
+                    idle: Number(cell.idle) || 0,
+                    pog: Number(cell.pog) || 0,
+                  };
+                } else {
+                  parsedMonths[key] = null;
+                }
+              });
+              return {
+                doc_id: r.doc_id,
+                partner_id: r.partner_id || null,
+                lot_no: r.lot_no,
+                checker_id: r.checker_id || null,
+                crop_year: r.crop_year || "FY2026",
+                months: parsedMonths,
+              };
+            }),
+            fsLots,
+          );
+        } else if (colKey === "partners") {
+          updatedCount = await bulkUpdatePartnersFirestore(
+            rowsToSave.map((r) => ({
+              doc_id: r.doc_id,
+              partner_name: r.partner_name,
+              category: r.category || "R1",
+              pic_employee_id: r.pic_employee_id || null,
+              division_group: r.division_group || effectiveDivision,
+              province: r.province || "-",
+              area: r.area || r.province || "-",
+            })),
+            fsEmployees,
+          );
+        } else if (colKey === "employees") {
+          const creds = await bulkUpdateEmployeesFirestore(
+            rowsToSave.map((r) => ({
+              doc_id: r.doc_id,
+              username: r.username,
+              full_name: r.full_name,
+              position: r.position || "Business Solution",
+              role_level: Number(r.role_level) || 1,
+              upline_id: r.upline_id || null,
+              subordinate_ids: r.subordinate_ids || [],
+              access_scope_ids: r.access_scope_ids || [],
+              division_group: r.division_group || effectiveDivision,
+              province: r.province || "-",
+              area: r.area || r.province || "-",
+              status: r.status || "Aktif",
+              password: r.password,
+            })),
+          );
+          updatedCount = creds.length;
+          try {
+            const savedMap = JSON.parse(localStorage.getItem("radar_emp_passwords") || "{}");
+            creds.forEach((c) => {
+              if (c.password) {
+                savedMap[c.doc_id] = c.password;
+                if (c.username) savedMap[c.username] = c.password;
+              }
+            });
+            localStorage.setItem("radar_emp_passwords", JSON.stringify(savedMap));
+          } catch {
+            // ignore localStorage quota
+          }
+        }
+
+        setInlineEdits((prev) => {
+          const nextCol = { ...prev[colKey] };
+          keys.forEach((k) => delete nextCol[k]);
+          return { ...prev, [colKey]: nextCol };
+        });
+        setSelectedRowIds((prev) => ({
+          ...prev,
+          [colKey]: prev[colKey].filter((id) => !keys.includes(id)),
+        }));
+        showToast(`${updatedCount} baris berhasil diperbarui di Firestore (${colKey}).`);
+      } catch (err: any) {
+        setEditError(err?.message || "Gagal menyimpan perubahan ke Firestore.");
+      } finally {
+        setIsSavingEdits(false);
+      }
+    },
+    [inlineEdits, firestoreDataset, firebaseUser, effectiveDivision, showToast],
+  );
+
+  const handleToggleSelectRow = useCallback((colKey: CollectionKey, docId: string) => {
+    setSelectedRowIds((prev) => {
+      const current = prev[colKey] || [];
+      const exists = current.includes(docId);
+      return {
+        ...prev,
+        [colKey]: exists ? current.filter((id) => id !== docId) : [...current, docId],
+      };
+    });
+  }, []);
+
+  const handleToggleSelectAllVisible = useCallback((colKey: CollectionKey, visibleDocIds: string[]) => {
+    setSelectedRowIds((prev) => {
+      const current = new Set(prev[colKey] || []);
+      const allSelected = visibleDocIds.length > 0 && visibleDocIds.every((id) => current.has(id));
+      if (allSelected) {
+        visibleDocIds.forEach((id) => current.delete(id));
+      } else {
+        visibleDocIds.forEach((id) => current.add(id));
+      }
+      return { ...prev, [colKey]: Array.from(current) };
+    });
+  }, []);
+
+  const handleRequestDeleteRows = useCallback(
+    (colKey: CollectionKey, docIds: string[], labels: string[]) => {
+      if (docIds.length === 0) return;
+      setDeleteConfirm({ colKey, docIds, labels });
+    },
+    [],
+  );
+
+  const handleConfirmDeleteRows = useCallback(async () => {
+    if (!deleteConfirm || deleteConfirm.docIds.length === 0) return;
+    const { colKey, docIds } = deleteConfirm;
+    setIsDeletingRows(true);
+    setEditError(null);
+    try {
+      const deletedCount = await bulkDeleteCollectionDocsFirestore(colKey, docIds);
+      setSelectedRowIds((prev) => ({
+        ...prev,
+        [colKey]: prev[colKey].filter((id) => !docIds.includes(id)),
+      }));
+      setInlineEdits((prev) => {
+        const nextCol = { ...prev[colKey] };
+        docIds.forEach((id) => delete nextCol[id]);
+        return { ...prev, [colKey]: nextCol };
+      });
+      setDeleteConfirm(null);
+      showToast(`${deletedCount} dokumen berhasil dihapus dari Firestore (${colKey}).`);
+    } catch (err: any) {
+      setEditError(err?.message || "Gagal menghapus dokumen dari Firestore.");
+      setDeleteConfirm(null);
+    } finally {
+      setIsDeletingRows(false);
+    }
+  }, [deleteConfirm, showToast]);
+
+  const activeEditsMap = inlineEdits[activeCollection] || {};
+  const activeEditCount = Object.keys(activeEditsMap).length;
+  const activeSelectedIds = selectedRowIds[activeCollection] || [];
+
   const renderFkBadge = (fkId: string | null, targetCol: CollectionKey) => {
     if (!fkId) return <span className="font-mono text-[11px] text-amber-600">null</span>;
     const tip = idTooltipMap[fkId] || fkId;
@@ -2048,6 +2649,96 @@ export const TempTab: React.FC<TempTabProps> = ({
             </div>
           )}
 
+          {(activeSelectedIds.length > 0 || activeEditCount > 0 || editError) && (
+            <div className="px-4 py-2.5 bg-indigo-50 border-b border-indigo-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="text-xs text-indigo-950 flex flex-col gap-0.5">
+                <div className="font-bold flex flex-wrap items-center gap-2">
+                  <span className="material-symbols-outlined text-[16px] text-primary">tune</span>
+                  {activeEditCount > 0 && (
+                    <span>
+                      {activeEditCount} baris sedang diedit inline ({activeCollection})
+                    </span>
+                  )}
+                  {activeSelectedIds.length > 0 && (
+                    <span className="px-2 py-0.5 rounded bg-white border border-indigo-200 text-primary font-mono text-[11px]">
+                      {activeSelectedIds.length} baris terpilih
+                    </span>
+                  )}
+                </div>
+                {editError && (
+                  <p className="text-red-700 font-semibold text-[11px]">{editError}</p>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                {activeSelectedIds.length > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const visible =
+                          activeCollection === "opname_logs"
+                            ? filteredLogs
+                            : activeCollection === "dr_shipments"
+                              ? filteredDr
+                              : activeCollection === "lots"
+                                ? filteredLots
+                                : activeCollection === "hybrids"
+                                  ? filteredHybrids
+                                  : activeCollection === "partners"
+                                    ? filteredPartners
+                                    : filteredEmployees;
+                        handleStartEditSelected(activeCollection, visible);
+                      }}
+                      className="h-8 px-3 rounded-lg bg-white border border-indigo-300 hover:bg-indigo-100 text-primary font-mono text-[11px] font-bold cursor-pointer flex items-center gap-1"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">edit</span>
+                      Edit Terpilih ({activeSelectedIds.length})
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isDeletingRows}
+                      onClick={() =>
+                        handleRequestDeleteRows(activeCollection, activeSelectedIds, activeSelectedIds)
+                      }
+                      className="h-8 px-3 rounded-lg bg-red-600 hover:bg-red-700 text-white font-mono text-[11px] font-bold cursor-pointer flex items-center gap-1 disabled:opacity-50"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">delete</span>
+                      Hapus Terpilih ({activeSelectedIds.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedRowIds((prev) => ({ ...prev, [activeCollection]: [] }))}
+                      className="h-8 px-2.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-[#434655] font-mono text-[11px] font-semibold cursor-pointer"
+                    >
+                      Batal Pilih
+                    </button>
+                  </>
+                )}
+                {activeEditCount > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={isSavingEdits}
+                      onClick={() => handleClearAllEdits(activeCollection)}
+                      className="h-8 px-2.5 rounded-lg bg-white border border-red-200 hover:bg-red-50 text-red-700 font-mono text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+                    >
+                      Batal Edit Semua
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSavingEdits}
+                      onClick={() => handleSaveEditedRows(activeCollection)}
+                      className="h-8 px-3.5 rounded-lg bg-[#154be2] hover:bg-[#154be2]/90 text-white font-mono text-[11px] font-bold cursor-pointer shadow-sm disabled:opacity-60 flex items-center gap-1"
+                    >
+                      <span className="material-symbols-outlined text-[15px]">save</span>
+                      {isSavingEdits ? "Menyimpan..." : `Simpan Perubahan (${activeEditCount})`}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="overflow-x-auto">
             {/* 1. opname_logs (Header Per Bulan: April -> Maret dengan IN, IDLE, POG) */}
             {activeCollection === "opname_logs" && (
@@ -2115,6 +2806,23 @@ export const TempTab: React.FC<TempTabProps> = ({
                 <table className="w-full text-left border-collapse font-mono text-xs">
                   <thead>
                     <tr className="border-b border-[#e0e0fa] bg-[#f4f2ff]/60">
+                      <th className="py-2 px-3 align-top w-8">
+                        <input
+                          type="checkbox"
+                          checked={
+                            filteredLogs.length > 0 &&
+                            filteredLogs.every((r) => selectedRowIds.opname_logs.includes(r.doc_id || r._key))
+                          }
+                          onChange={() =>
+                            handleToggleSelectAllVisible(
+                              "opname_logs",
+                              filteredLogs.map((r) => r.doc_id || r._key),
+                            )
+                          }
+                          className="cursor-pointer accent-[#154be2]"
+                          title="Pilih semua baris terlihat"
+                        />
+                      </th>
                       {renderHeaderCell("opname_logs", "partner_id", "partner_id (FK)")}
                       {renderHeaderCell("opname_logs", "lot_no", "lot_no (FK)")}
                       {renderHeaderCell("opname_logs", "checker_id", "checker_id (FK)")}
@@ -2122,16 +2830,15 @@ export const TempTab: React.FC<TempTabProps> = ({
                       {FISCAL_MONTH_COLS.map((m) =>
                         renderHeaderCell("opname_logs", m.key, m.label, "center"),
                       )}
-                      {inlineDrafts.opname_logs.length > 0 && (
-                        <th className="py-2 px-3 text-right align-top font-bold text-[11px] text-[#434655] whitespace-nowrap">
-                          actions
-                        </th>
-                      )}
+                      <th className="py-2 px-3 text-right align-top font-bold text-[11px] text-[#434655] whitespace-nowrap">
+                        actions
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#f1f0fa] text-[#181a2c]">
                     {inlineDrafts.opname_logs.map((d) => (
                       <tr key={d._draftId} className="bg-emerald-50/45 border-b border-emerald-200/70">
+                        <td className="py-2 px-3 text-[10px] font-bold text-emerald-700">+</td>
                         <td className="py-2 px-2 whitespace-nowrap">
                           <select
                             value={d.partner_id}
@@ -2262,86 +2969,258 @@ export const TempTab: React.FC<TempTabProps> = ({
                         </td>
                       </tr>
                     ))}
-                    {filteredLogs.map((l) => (
-                      <tr key={l._key} className="hover:bg-[#f4f2ff]/30">
-                        <td className="py-2.5 px-3 whitespace-nowrap">
-                          {renderFkBadge(l.partner_id, "partners")}
-                        </td>
-                        <td className="py-2.5 px-3 whitespace-nowrap">
-                          {renderFkBadge(l.lot_no, "lots")}
-                        </td>
-                        <td className="py-2.5 px-3 whitespace-nowrap">
-                          {renderFkBadge(l.checker_id, "employees")}
-                        </td>
-                        <td className="py-2.5 px-3 font-semibold text-[#434655] whitespace-nowrap">
-                          {l.crop_year}
-                        </td>
-                        {FISCAL_MONTH_COLS.map(({ key }) => {
-                          const cell = l[key];
-                          if (!cell) {
-                            return (
-                              <td
-                                key={key}
-                                className="py-2.5 px-3 text-center text-[#c0c2d4] border-l border-[#f4f2ff]"
+                    {filteredLogs.map((l) => {
+                      const rowId = l.doc_id || l._key;
+                      const editRow = inlineEdits.opname_logs[rowId];
+                      const isChecked = selectedRowIds.opname_logs.includes(rowId);
+
+                      if (editRow) {
+                        return (
+                          <tr key={rowId} className="bg-indigo-50/55 border-b border-indigo-200">
+                            <td className="py-2 px-3">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => handleToggleSelectRow("opname_logs", rowId)}
+                                className="cursor-pointer accent-[#154be2]"
+                              />
+                            </td>
+                            <td className="py-2 px-2 whitespace-nowrap">
+                              <select
+                                value={editRow.partner_id}
+                                onChange={(e) =>
+                                  handleUpdateEditField("opname_logs", rowId, {
+                                    partner_id: e.target.value,
+                                  })
+                                }
+                                className="h-8 w-44 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
                               >
-                                -
-                              </td>
-                            );
-                          }
-                          if (opnameMetricView === "in") {
-                            return (
-                              <td
-                                key={key}
-                                className="py-2.5 px-3 text-right tabular-nums font-bold text-blue-700 border-l border-[#f4f2ff]"
+                                <option value="">-- Pilih Partner --</option>
+                                {partnersCol.map((p) => (
+                                  <option key={p.doc_id} value={p.doc_id}>
+                                    {p.doc_id} · {p.partner_name}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="py-2 px-2 whitespace-nowrap">
+                              <input
+                                type="text"
+                                list="inline-lots-list"
+                                value={editRow.lot_no}
+                                onChange={(e) =>
+                                  handleUpdateEditField("opname_logs", rowId, {
+                                    lot_no: e.target.value.toUpperCase(),
+                                  })
+                                }
+                                className="h-8 w-32 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-bold uppercase outline-none"
+                              />
+                            </td>
+                            <td className="py-2 px-2 whitespace-nowrap">
+                              <select
+                                value={editRow.checker_id}
+                                onChange={(e) =>
+                                  handleUpdateEditField("opname_logs", rowId, {
+                                    checker_id: e.target.value,
+                                  })
+                                }
+                                className="h-8 w-40 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
                               >
-                                {cell.in}
-                              </td>
-                            );
-                          }
-                          if (opnameMetricView === "idle") {
-                            return (
-                              <td
-                                key={key}
-                                className="py-2.5 px-3 text-right tabular-nums font-bold text-amber-700 border-l border-[#f4f2ff]"
-                              >
-                                {cell.idle}
-                              </td>
-                            );
-                          }
-                          if (opnameMetricView === "pog") {
-                            return (
-                              <td
-                                key={key}
-                                className="py-2.5 px-3 text-right tabular-nums font-bold text-emerald-700 border-l border-[#f4f2ff]"
-                              >
-                                {cell.pog}
-                              </td>
-                            );
-                          }
-                          return (
-                            <td
-                              key={key}
-                              className="py-2 px-2.5 border-l border-[#f4f2ff] whitespace-nowrap"
-                            >
-                              <div className="flex items-center justify-between gap-1.5 text-[10px] leading-tight bg-[#f9f8ff] px-2 py-1 rounded border border-[#e8e6fc]">
-                                <span className="text-blue-700 font-semibold" title="Stock In (kg)">
-                                  in:{cell.in}
-                                </span>
-                                <span className="text-[#c0c2d4]">|</span>
-                                <span className="text-amber-700 font-bold" title="Idle / Sisa Stok (kg)">
-                                  idle:{cell.idle}
-                                </span>
-                                <span className="text-[#c0c2d4]">|</span>
-                                <span className="text-emerald-700 font-bold" title="POG / Terserap (kg)">
-                                  pog:{cell.pog}
-                                </span>
+                                <option value="">-- Pilih Checker --</option>
+                                {employeesCol.map((emp) => (
+                                  <option key={emp.doc_id} value={emp.doc_id}>
+                                    {emp.doc_id} · {emp.full_name}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="py-2 px-2 whitespace-nowrap">
+                              <input
+                                type="text"
+                                value={editRow.crop_year}
+                                onChange={(e) =>
+                                  handleUpdateEditField("opname_logs", rowId, {
+                                    crop_year: e.target.value,
+                                  })
+                                }
+                                className="h-8 w-20 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none text-center"
+                              />
+                            </td>
+                            {FISCAL_MONTH_COLS.map(({ key }) => {
+                              const cell = editRow.months?.[key] || { in: "", idle: "", pog: "" };
+                              return (
+                                <td key={key} className="py-1.5 px-1.5 border-l border-indigo-200/70 whitespace-nowrap">
+                                  <div className="flex items-center gap-1">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      placeholder="in"
+                                      value={cell.in}
+                                      onChange={(e) =>
+                                        handleUpdateEditOpnameMonthCell(rowId, key, "in", e.target.value)
+                                      }
+                                      className="h-7 w-12 bg-white border border-blue-200 focus:border-blue-500 rounded px-1 text-[10px] text-center font-semibold text-blue-700 outline-none"
+                                    />
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      placeholder="idl"
+                                      value={cell.idle}
+                                      onChange={(e) =>
+                                        handleUpdateEditOpnameMonthCell(rowId, key, "idle", e.target.value)
+                                      }
+                                      className="h-7 w-12 bg-white border border-amber-200 focus:border-amber-500 rounded px-1 text-[10px] text-center font-semibold text-amber-700 outline-none"
+                                    />
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      placeholder="pog"
+                                      value={cell.pog}
+                                      onChange={(e) =>
+                                        handleUpdateEditOpnameMonthCell(rowId, key, "pog", e.target.value)
+                                      }
+                                      className="h-7 w-12 bg-white border border-emerald-300 focus:border-emerald-600 rounded px-1 text-[10px] text-center font-semibold text-emerald-700 outline-none"
+                                    />
+                                  </div>
+                                </td>
+                              );
+                            })}
+                            <td className="py-2 px-3 text-right whitespace-nowrap font-sans">
+                              <div className="inline-flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  disabled={isSavingEdits}
+                                  onClick={() => handleSaveEditedRows("opname_logs", [rowId])}
+                                  className="px-2 py-1 rounded bg-[#154be2] hover:bg-[#154be2]/90 text-white text-[10px] font-bold cursor-pointer disabled:opacity-50"
+                                >
+                                  Simpan
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCancelEditRow("opname_logs", rowId)}
+                                  className="px-2 py-1 rounded bg-white border border-slate-200 hover:bg-slate-100 text-[#434655] text-[10px] font-semibold cursor-pointer"
+                                >
+                                  Batal
+                                </button>
                               </div>
                             </td>
-                          );
-                        })}
-                        {inlineDrafts.opname_logs.length > 0 && <td />}
-                      </tr>
-                    ))}
+                          </tr>
+                        );
+                      }
+
+                      return (
+                        <tr key={rowId} className={`hover:bg-[#f4f2ff]/30 ${isChecked ? "bg-indigo-50/30" : ""}`}>
+                          <td className="py-2.5 px-3">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => handleToggleSelectRow("opname_logs", rowId)}
+                              className="cursor-pointer accent-[#154be2]"
+                            />
+                          </td>
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            {renderFkBadge(l.partner_id, "partners")}
+                          </td>
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            {renderFkBadge(l.lot_no, "lots")}
+                          </td>
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            {renderFkBadge(l.checker_id, "employees")}
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold text-[#434655] whitespace-nowrap">
+                            {l.crop_year}
+                          </td>
+                          {FISCAL_MONTH_COLS.map(({ key }) => {
+                            const cell = l[key];
+                            if (!cell) {
+                              return (
+                                <td
+                                  key={key}
+                                  className="py-2.5 px-3 text-center text-[#c0c2d4] border-l border-[#f4f2ff]"
+                                >
+                                  -
+                                </td>
+                              );
+                            }
+                            if (opnameMetricView === "in") {
+                              return (
+                                <td
+                                  key={key}
+                                  className="py-2.5 px-3 text-right tabular-nums font-bold text-blue-700 border-l border-[#f4f2ff]"
+                                >
+                                  {cell.in}
+                                </td>
+                              );
+                            }
+                            if (opnameMetricView === "idle") {
+                              return (
+                                <td
+                                  key={key}
+                                  className="py-2.5 px-3 text-right tabular-nums font-bold text-amber-700 border-l border-[#f4f2ff]"
+                                >
+                                  {cell.idle}
+                                </td>
+                              );
+                            }
+                            if (opnameMetricView === "pog") {
+                              return (
+                                <td
+                                  key={key}
+                                  className="py-2.5 px-3 text-right tabular-nums font-bold text-emerald-700 border-l border-[#f4f2ff]"
+                                >
+                                  {cell.pog}
+                                </td>
+                              );
+                            }
+                            return (
+                              <td
+                                key={key}
+                                className="py-2 px-2.5 border-l border-[#f4f2ff] whitespace-nowrap"
+                              >
+                                <div className="flex items-center justify-between gap-1.5 text-[10px] leading-tight bg-[#f9f8ff] px-2 py-1 rounded border border-[#e8e6fc]">
+                                  <span className="text-blue-700 font-semibold" title="Stock In (kg)">
+                                    in:{cell.in}
+                                  </span>
+                                  <span className="text-[#c0c2d4]">|</span>
+                                  <span className="text-amber-700 font-bold" title="Idle / Sisa Stok (kg)">
+                                    idle:{cell.idle}
+                                  </span>
+                                  <span className="text-[#c0c2d4]">|</span>
+                                  <span className="text-emerald-700 font-bold" title="POG / Terserap (kg)">
+                                    pog:{cell.pog}
+                                  </span>
+                                </div>
+                              </td>
+                            );
+                          })}
+                          <td className="py-2.5 px-3 text-right whitespace-nowrap font-sans">
+                            <div className="inline-flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleStartEditRow("opname_logs", l)}
+                                className="px-2 py-0.5 rounded bg-[#f4f2ff] hover:bg-[#e6e6ff] text-primary text-[11px] font-semibold cursor-pointer"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleRequestDeleteRows("opname_logs", [rowId], [
+                                    `${l.partner_id || "NO_PRT"} · ${l.lot_no}`,
+                                  ])
+                                }
+                                className="px-2 py-0.5 rounded bg-red-50 hover:bg-red-100 text-red-600 text-[11px] font-semibold cursor-pointer"
+                              >
+                                Del
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -2393,22 +3272,37 @@ export const TempTab: React.FC<TempTabProps> = ({
                 <table className="w-full text-left border-collapse font-mono text-xs">
                   <thead>
                     <tr className="border-b border-[#e0e0fa] bg-[#f4f2ff]/60">
+                      <th className="py-2 px-3 align-top w-8">
+                        <input
+                          type="checkbox"
+                          checked={
+                            filteredDr.length > 0 &&
+                            filteredDr.every((r) => selectedRowIds.dr_shipments.includes(r.doc_id))
+                          }
+                          onChange={() =>
+                            handleToggleSelectAllVisible(
+                              "dr_shipments",
+                              filteredDr.map((r) => r.doc_id),
+                            )
+                          }
+                          className="cursor-pointer accent-[#154be2]"
+                        />
+                      </th>
                       {renderHeaderCell("dr_shipments", "doc_id", "doc_id (PK)")}
                       {renderHeaderCell("dr_shipments", "shipping_date", "shipping_date")}
                       {renderHeaderCell("dr_shipments", "partner_id", "partner_id (FK)")}
                       {renderHeaderCell("dr_shipments", "lot_no", "lot_no (FK)")}
                       {renderHeaderCell("dr_shipments", "exp_date", "exp_date")}
                       {renderHeaderCell("dr_shipments", "shipped_qty_kg", "shipped_qty_kg", "right")}
-                      {inlineDrafts.dr_shipments.length > 0 && (
-                        <th className="py-2 px-4 text-right align-top font-bold text-[11px] text-[#434655]">
-                          actions
-                        </th>
-                      )}
+                      <th className="py-2 px-4 text-right align-top font-bold text-[11px] text-[#434655]">
+                        actions
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#f1f0fa] text-[#181a2c]">
                     {inlineDrafts.dr_shipments.map((d) => (
                       <tr key={d._draftId} className="bg-emerald-50/45 border-b border-emerald-200/70">
+                        <td className="py-2 px-3 text-[10px] font-bold text-emerald-700">+</td>
                         <td className="py-2 px-4 text-[11px] text-emerald-700 font-semibold italic">
                           (auto)
                         </td>
@@ -2503,19 +3397,153 @@ export const TempTab: React.FC<TempTabProps> = ({
                         </td>
                       </tr>
                     ))}
-                    {filteredDr.map((d) => (
-                      <tr key={d.doc_id} className="hover:bg-[#f4f2ff]/30">
-                        <td className="py-2.5 px-4 font-bold">{d.doc_id}</td>
-                        <td className="py-2.5 px-4 text-[#434655]">{d.shipping_date}</td>
-                        <td className="py-2.5 px-4">{renderFkBadge(d.partner_id, "partners")}</td>
-                        <td className="py-2.5 px-4">{renderFkBadge(d.lot_no, "lots")}</td>
-                        <td className="py-2.5 px-4 text-[#434655]">{d.exp_date || "null"}</td>
-                        <td className="py-2.5 px-4 text-right tabular-nums font-bold">
-                          {d.shipped_qty_kg}
-                        </td>
-                        {inlineDrafts.dr_shipments.length > 0 && <td />}
-                      </tr>
-                    ))}
+                    {filteredDr.map((d) => {
+                      const editRow = inlineEdits.dr_shipments[d.doc_id];
+                      const isChecked = selectedRowIds.dr_shipments.includes(d.doc_id);
+                      if (editRow) {
+                        return (
+                          <tr key={d.doc_id} className="bg-indigo-50/55 border-b border-indigo-200">
+                            <td className="py-2 px-3">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => handleToggleSelectRow("dr_shipments", d.doc_id)}
+                                className="cursor-pointer accent-[#154be2]"
+                              />
+                            </td>
+                            <td className="py-2 px-4 font-bold text-primary">{d.doc_id}</td>
+                            <td className="py-2 px-3">
+                              <input
+                                type="date"
+                                value={editRow.shipping_date}
+                                onChange={(e) =>
+                                  handleUpdateEditField("dr_shipments", d.doc_id, {
+                                    shipping_date: e.target.value,
+                                  })
+                                }
+                                className="h-8 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                              />
+                            </td>
+                            <td className="py-2 px-3">
+                              <select
+                                value={editRow.partner_id}
+                                onChange={(e) =>
+                                  handleUpdateEditField("dr_shipments", d.doc_id, {
+                                    partner_id: e.target.value,
+                                  })
+                                }
+                                className="h-8 w-44 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                              >
+                                <option value="">-- Pilih Partner --</option>
+                                {partnersCol.map((p) => (
+                                  <option key={p.doc_id} value={p.doc_id}>
+                                    {p.doc_id} · {p.partner_name}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="py-2 px-3">
+                              <input
+                                type="text"
+                                list="inline-lots-list"
+                                value={editRow.lot_no}
+                                onChange={(e) =>
+                                  handleUpdateEditField("dr_shipments", d.doc_id, {
+                                    lot_no: e.target.value,
+                                  })
+                                }
+                                className="h-8 w-32 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-bold uppercase outline-none"
+                              />
+                            </td>
+                            <td className="py-2 px-3">
+                              <input
+                                type="text"
+                                value={editRow.exp_date}
+                                onChange={(e) =>
+                                  handleUpdateEditField("dr_shipments", d.doc_id, {
+                                    exp_date: e.target.value,
+                                  })
+                                }
+                                className="h-8 w-28 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                              />
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={editRow.shipped_qty_kg}
+                                onChange={(e) =>
+                                  handleUpdateEditField("dr_shipments", d.doc_id, {
+                                    shipped_qty_kg: e.target.value,
+                                  })
+                                }
+                                className="h-8 w-24 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-bold text-right outline-none"
+                              />
+                            </td>
+                            <td className="py-2 px-4 text-right whitespace-nowrap font-sans">
+                              <div className="inline-flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  disabled={isSavingEdits}
+                                  onClick={() => handleSaveEditedRows("dr_shipments", [d.doc_id])}
+                                  className="px-2 py-1 rounded bg-[#154be2] hover:bg-[#154be2]/90 text-white text-[10px] font-bold cursor-pointer disabled:opacity-50"
+                                >
+                                  Simpan
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCancelEditRow("dr_shipments", d.doc_id)}
+                                  className="px-2 py-1 rounded bg-white border border-slate-200 hover:bg-slate-100 text-[#434655] text-[10px] font-semibold cursor-pointer"
+                                >
+                                  Batal
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      }
+                      return (
+                        <tr key={d.doc_id} className={`hover:bg-[#f4f2ff]/30 ${isChecked ? "bg-indigo-50/30" : ""}`}>
+                          <td className="py-2.5 px-3">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => handleToggleSelectRow("dr_shipments", d.doc_id)}
+                              className="cursor-pointer accent-[#154be2]"
+                            />
+                          </td>
+                          <td className="py-2.5 px-4 font-bold">{d.doc_id}</td>
+                          <td className="py-2.5 px-4 text-[#434655]">{d.shipping_date}</td>
+                          <td className="py-2.5 px-4">{renderFkBadge(d.partner_id, "partners")}</td>
+                          <td className="py-2.5 px-4">{renderFkBadge(d.lot_no, "lots")}</td>
+                          <td className="py-2.5 px-4 text-[#434655]">{d.exp_date || "null"}</td>
+                          <td className="py-2.5 px-4 text-right tabular-nums font-bold">
+                            {d.shipped_qty_kg}
+                          </td>
+                          <td className="py-2.5 px-4 text-right whitespace-nowrap font-sans">
+                            <div className="inline-flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleStartEditRow("dr_shipments", d)}
+                                className="px-2 py-0.5 rounded bg-[#f4f2ff] hover:bg-[#e6e6ff] text-primary text-[11px] font-semibold cursor-pointer"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleRequestDeleteRows("dr_shipments", [d.doc_id], [`${d.doc_id} (${d.lot_no})`])
+                                }
+                                className="px-2 py-0.5 rounded bg-red-50 hover:bg-red-100 text-red-600 text-[11px] font-semibold cursor-pointer"
+                              >
+                                Del
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -2526,21 +3554,36 @@ export const TempTab: React.FC<TempTabProps> = ({
               <table className="w-full text-left border-collapse font-mono text-xs">
                 <thead>
                   <tr className="border-b border-[#e0e0fa] bg-[#f4f2ff]/60">
+                    <th className="py-2 px-3 align-top w-8">
+                      <input
+                        type="checkbox"
+                        checked={
+                          filteredLots.length > 0 &&
+                          filteredLots.every((r) => selectedRowIds.lots.includes(r.doc_id))
+                        }
+                        onChange={() =>
+                          handleToggleSelectAllVisible(
+                            "lots",
+                            filteredLots.map((r) => r.doc_id),
+                          )
+                        }
+                        className="cursor-pointer accent-[#154be2]"
+                      />
+                    </th>
                     {renderHeaderCell("lots", "doc_id", "doc_id / lot_no (PK)")}
                     {renderHeaderCell("lots", "hybrid_id", "hybrid_id (FK)")}
                     {renderHeaderCell("lots", "shipping_date", "shipping_date")}
                     {renderHeaderCell("lots", "exp_date", "exp_date")}
                     {renderHeaderCell("lots", "initial_dr_kg", "initial_dr_kg", "right")}
-                    {inlineDrafts.lots.length > 0 && (
-                      <th className="py-2 px-4 text-right align-top font-bold text-[11px] text-[#434655]">
-                        actions
-                      </th>
-                    )}
+                    <th className="py-2 px-4 text-right align-top font-bold text-[11px] text-[#434655]">
+                      actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#f1f0fa] text-[#181a2c]">
                   {inlineDrafts.lots.map((d) => (
                     <tr key={d._draftId} className="bg-emerald-50/45 border-b border-emerald-200/70">
+                      <td className="py-2 px-3 text-[10px] font-bold text-emerald-700">+</td>
                       <td className="py-2 px-3">
                         <input
                           type="text"
@@ -2631,18 +3674,138 @@ export const TempTab: React.FC<TempTabProps> = ({
                       </td>
                     </tr>
                   ))}
-                  {filteredLots.map((l) => (
-                    <tr key={l.doc_id} className="hover:bg-[#f4f2ff]/30">
-                      <td className="py-2.5 px-4 font-bold">{l.doc_id}</td>
-                      <td className="py-2.5 px-4">{renderFkBadge(l.hybrid_id, "hybrids")}</td>
-                      <td className="py-2.5 px-4 text-[#434655]">{l.shipping_date || "null"}</td>
-                      <td className="py-2.5 px-4 text-[#434655]">{l.exp_date || "null"}</td>
-                      <td className="py-2.5 px-4 text-right tabular-nums font-bold">
-                        {l.initial_dr_kg}
-                      </td>
-                      {inlineDrafts.lots.length > 0 && <td />}
-                    </tr>
-                  ))}
+                  {filteredLots.map((l) => {
+                    const editRow = inlineEdits.lots[l.doc_id];
+                    const isChecked = selectedRowIds.lots.includes(l.doc_id);
+                    if (editRow) {
+                      return (
+                        <tr key={l.doc_id} className="bg-indigo-50/55 border-b border-indigo-200">
+                          <td className="py-2 px-3">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => handleToggleSelectRow("lots", l.doc_id)}
+                              className="cursor-pointer accent-[#154be2]"
+                            />
+                          </td>
+                          <td className="py-2 px-4 font-bold text-primary">{l.doc_id}</td>
+                          <td className="py-2 px-3">
+                            <select
+                              value={editRow.hybrid_id}
+                              onChange={(e) =>
+                                handleUpdateEditField("lots", l.doc_id, {
+                                  hybrid_id: e.target.value,
+                                })
+                              }
+                              className="h-8 w-48 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                            >
+                              <option value="">-- Tanpa Hybrid --</option>
+                              {hybridsCol.map((h) => (
+                                <option key={h.doc_id} value={h.doc_id}>
+                                  {h.doc_id} · {h.hybrid_name} ({h.crop_type})
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="py-2 px-3">
+                            <input
+                              type="date"
+                              value={editRow.shipping_date}
+                              onChange={(e) =>
+                                handleUpdateEditField("lots", l.doc_id, {
+                                  shipping_date: e.target.value,
+                                })
+                              }
+                              className="h-8 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                            />
+                          </td>
+                          <td className="py-2 px-3">
+                            <input
+                              type="text"
+                              value={editRow.exp_date}
+                              onChange={(e) =>
+                                handleUpdateEditField("lots", l.doc_id, {
+                                  exp_date: e.target.value,
+                                })
+                              }
+                              placeholder="YYYY-MM-DD"
+                              className="h-8 w-28 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                            />
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={editRow.initial_dr_kg}
+                              onChange={(e) =>
+                                handleUpdateEditField("lots", l.doc_id, {
+                                  initial_dr_kg: e.target.value,
+                                })
+                              }
+                              className="h-8 w-24 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-bold text-right outline-none"
+                            />
+                          </td>
+                          <td className="py-2 px-4 text-right whitespace-nowrap font-sans">
+                            <div className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                disabled={isSavingEdits}
+                                onClick={() => handleSaveEditedRows("lots", [l.doc_id])}
+                                className="px-2 py-1 rounded bg-[#154be2] hover:bg-[#154be2]/90 text-white text-[10px] font-bold cursor-pointer disabled:opacity-50"
+                              >
+                                Simpan
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleCancelEditRow("lots", l.doc_id)}
+                                className="px-2 py-1 rounded bg-white border border-slate-200 hover:bg-slate-100 text-[#434655] text-[10px] font-semibold cursor-pointer"
+                              >
+                                Batal
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    }
+                    return (
+                      <tr key={l.doc_id} className={`hover:bg-[#f4f2ff]/30 ${isChecked ? "bg-indigo-50/30" : ""}`}>
+                        <td className="py-2.5 px-3">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleToggleSelectRow("lots", l.doc_id)}
+                            className="cursor-pointer accent-[#154be2]"
+                          />
+                        </td>
+                        <td className="py-2.5 px-4 font-bold">{l.doc_id}</td>
+                        <td className="py-2.5 px-4">{renderFkBadge(l.hybrid_id, "hybrids")}</td>
+                        <td className="py-2.5 px-4 text-[#434655]">{l.shipping_date || "null"}</td>
+                        <td className="py-2.5 px-4 text-[#434655]">{l.exp_date || "null"}</td>
+                        <td className="py-2.5 px-4 text-right tabular-nums font-bold">
+                          {l.initial_dr_kg}
+                        </td>
+                        <td className="py-2.5 px-4 text-right whitespace-nowrap font-sans">
+                          <div className="inline-flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditRow("lots", l)}
+                              className="px-2 py-0.5 rounded bg-[#f4f2ff] hover:bg-[#e6e6ff] text-primary text-[11px] font-semibold cursor-pointer"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRequestDeleteRows("lots", [l.doc_id], [l.doc_id])}
+                              className="px-2 py-0.5 rounded bg-red-50 hover:bg-red-100 text-red-600 text-[11px] font-semibold cursor-pointer"
+                            >
+                              Del
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -2652,19 +3815,34 @@ export const TempTab: React.FC<TempTabProps> = ({
               <table className="w-full text-left border-collapse font-mono text-xs">
                 <thead>
                   <tr className="border-b border-[#e0e0fa] bg-[#f4f2ff]/60">
+                    <th className="py-2 px-3 align-top w-8">
+                      <input
+                        type="checkbox"
+                        checked={
+                          filteredHybrids.length > 0 &&
+                          filteredHybrids.every((r) => selectedRowIds.hybrids.includes(r.doc_id))
+                        }
+                        onChange={() =>
+                          handleToggleSelectAllVisible(
+                            "hybrids",
+                            filteredHybrids.map((r) => r.doc_id),
+                          )
+                        }
+                        className="cursor-pointer accent-[#154be2]"
+                      />
+                    </th>
                     {renderHeaderCell("hybrids", "doc_id", "doc_id (PK)")}
                     {renderHeaderCell("hybrids", "hybrid_name", "hybrid_name")}
                     {renderHeaderCell("hybrids", "crop_type", "crop_type")}
-                    {inlineDrafts.hybrids.length > 0 && (
-                      <th className="py-2 px-4 text-right align-top font-bold text-[11px] text-[#434655]">
-                        actions
-                      </th>
-                    )}
+                    <th className="py-2 px-4 text-right align-top font-bold text-[11px] text-[#434655]">
+                      actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#f1f0fa] text-[#181a2c]">
                   {inlineDrafts.hybrids.map((d) => (
                     <tr key={d._draftId} className="bg-emerald-50/45 border-b border-emerald-200/70">
+                      <td className="py-2 px-3 text-[10px] font-bold text-emerald-700">+</td>
                       <td className="py-2 px-4 text-[11px] text-emerald-700 font-semibold italic">
                         (auto)
                       </td>
@@ -2715,16 +3893,107 @@ export const TempTab: React.FC<TempTabProps> = ({
                       </td>
                     </tr>
                   ))}
-                  {filteredHybrids.map((h) => (
-                    <tr key={h.doc_id} className="hover:bg-[#f4f2ff]/30">
-                      <td className="py-2.5 px-4 font-bold">{h.doc_id}</td>
-                      <td className="py-2.5 px-4 font-sans font-semibold text-primary">
-                        {h.hybrid_name}
-                      </td>
-                      <td className="py-2.5 px-4 font-sans text-[#434655]">{h.crop_type}</td>
-                      {inlineDrafts.hybrids.length > 0 && <td />}
-                    </tr>
-                  ))}
+                  {filteredHybrids.map((h) => {
+                    const editRow = inlineEdits.hybrids[h.doc_id];
+                    const isChecked = selectedRowIds.hybrids.includes(h.doc_id);
+                    if (editRow) {
+                      return (
+                        <tr key={h.doc_id} className="bg-indigo-50/55 border-b border-indigo-200">
+                          <td className="py-2 px-3">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => handleToggleSelectRow("hybrids", h.doc_id)}
+                              className="cursor-pointer accent-[#154be2]"
+                            />
+                          </td>
+                          <td className="py-2 px-4 font-bold text-primary">{h.doc_id}</td>
+                          <td className="py-2 px-3">
+                            <input
+                              type="text"
+                              value={editRow.hybrid_name}
+                              onChange={(e) =>
+                                handleUpdateEditField("hybrids", h.doc_id, {
+                                  hybrid_name: e.target.value.toUpperCase(),
+                                })
+                              }
+                              className="h-8 w-56 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-bold uppercase outline-none"
+                            />
+                          </td>
+                          <td className="py-2 px-3">
+                            <select
+                              value={editRow.crop_type}
+                              onChange={(e) =>
+                                handleUpdateEditField("hybrids", h.doc_id, {
+                                  crop_type: e.target.value,
+                                })
+                              }
+                              className="h-8 w-36 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                            >
+                              <option value="Field Corn">Field Corn</option>
+                              <option value="Vegetables">Vegetables</option>
+                            </select>
+                          </td>
+                          <td className="py-2 px-4 text-right whitespace-nowrap font-sans">
+                            <div className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                disabled={isSavingEdits}
+                                onClick={() => handleSaveEditedRows("hybrids", [h.doc_id])}
+                                className="px-2 py-1 rounded bg-[#154be2] hover:bg-[#154be2]/90 text-white text-[10px] font-bold cursor-pointer disabled:opacity-50"
+                              >
+                                Simpan
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleCancelEditRow("hybrids", h.doc_id)}
+                                className="px-2 py-1 rounded bg-white border border-slate-200 hover:bg-slate-100 text-[#434655] text-[10px] font-semibold cursor-pointer"
+                              >
+                                Batal
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    }
+                    return (
+                      <tr key={h.doc_id} className={`hover:bg-[#f4f2ff]/30 ${isChecked ? "bg-indigo-50/30" : ""}`}>
+                        <td className="py-2.5 px-3">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleToggleSelectRow("hybrids", h.doc_id)}
+                            className="cursor-pointer accent-[#154be2]"
+                          />
+                        </td>
+                        <td className="py-2.5 px-4 font-bold">{h.doc_id}</td>
+                        <td className="py-2.5 px-4 font-sans font-semibold text-primary">
+                          {h.hybrid_name}
+                        </td>
+                        <td className="py-2.5 px-4 font-sans text-[#434655]">{h.crop_type}</td>
+                        <td className="py-2.5 px-4 text-right whitespace-nowrap font-sans">
+                          <div className="inline-flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditRow("hybrids", h)}
+                              className="px-2 py-0.5 rounded bg-[#f4f2ff] hover:bg-[#e6e6ff] text-primary text-[11px] font-semibold cursor-pointer"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleRequestDeleteRows("hybrids", [h.doc_id], [`${h.doc_id} · ${h.hybrid_name}`])
+                              }
+                              className="px-2 py-0.5 rounded bg-red-50 hover:bg-red-100 text-red-600 text-[11px] font-semibold cursor-pointer"
+                            >
+                              Del
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -2734,6 +4003,22 @@ export const TempTab: React.FC<TempTabProps> = ({
               <table className="w-full text-left border-collapse font-mono text-xs">
                 <thead>
                   <tr className="border-b border-[#e0e0fa] bg-[#f4f2ff]/60">
+                    <th className="py-2 px-3 align-top w-8">
+                      <input
+                        type="checkbox"
+                        checked={
+                          filteredPartners.length > 0 &&
+                          filteredPartners.every((r) => selectedRowIds.partners.includes(r.doc_id))
+                        }
+                        onChange={() =>
+                          handleToggleSelectAllVisible(
+                            "partners",
+                            filteredPartners.map((r) => r.doc_id),
+                          )
+                        }
+                        className="cursor-pointer accent-[#154be2]"
+                      />
+                    </th>
                     {renderHeaderCell("partners", "doc_id", "doc_id (PK)")}
                     {renderHeaderCell("partners", "partner_name", "partner_name")}
                     {renderHeaderCell("partners", "category", "category")}
@@ -2749,6 +4034,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                 <tbody className="divide-y divide-[#f1f0fa] text-[#181a2c]">
                   {inlineDrafts.partners.map((d) => (
                     <tr key={d._draftId} className="bg-emerald-50/45 border-b border-emerald-200/70">
+                      <td className="py-2 px-3 text-[10px] font-bold text-emerald-700">+</td>
                       <td className="py-2 px-4 text-[11px] text-emerald-700 font-semibold italic">
                         (auto)
                       </td>
@@ -2861,41 +4147,171 @@ export const TempTab: React.FC<TempTabProps> = ({
                       </td>
                     </tr>
                   ))}
-                  {filteredPartners.map((p) => (
-                    <tr key={p.doc_id} className="hover:bg-[#f4f2ff]/30">
-                      <td className="py-2.5 px-4 font-bold">{p.doc_id}</td>
-                      <td className="py-2.5 px-4 font-sans font-semibold">{p.partner_name}</td>
-                      <td className="py-2.5 px-4 text-primary font-semibold">{p.category}</td>
-                      <td className="py-2.5 px-4">
-                        {renderFkBadge(p.pic_employee_id, "employees")}
-                      </td>
-                      <td className="py-2.5 px-4 font-sans text-[#434655]">{p.division_group}</td>
-                      <td className="py-2.5 px-4 font-sans text-[#434655]">{p.province}</td>
-                      <td className="py-2.5 px-4 font-sans text-[#434655]">{p.area}</td>
-                      <td className="py-2.5 px-4 text-right font-sans">
-                        <div className="inline-flex items-center gap-1.5">
-                          {setPartnerEditModal && (
+                  {filteredPartners.map((p) => {
+                    const editRow = inlineEdits.partners[p.doc_id];
+                    const isChecked = selectedRowIds.partners.includes(p.doc_id);
+                    if (editRow) {
+                      return (
+                        <tr key={p.doc_id} className="bg-indigo-50/55 border-b border-indigo-200">
+                          <td className="py-2 px-3">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => handleToggleSelectRow("partners", p.doc_id)}
+                              className="cursor-pointer accent-[#154be2]"
+                            />
+                          </td>
+                          <td className="py-2 px-4 font-bold text-primary">{p.doc_id}</td>
+                          <td className="py-2 px-3">
+                            <input
+                              type="text"
+                              value={editRow.partner_name}
+                              onChange={(e) =>
+                                handleUpdateEditField("partners", p.doc_id, {
+                                  partner_name: e.target.value,
+                                })
+                              }
+                              className="h-8 w-48 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-sans font-semibold outline-none"
+                            />
+                          </td>
+                          <td className="py-2 px-3">
+                            <select
+                              value={editRow.category}
+                              onChange={(e) =>
+                                handleUpdateEditField("partners", p.doc_id, {
+                                  category: e.target.value,
+                                })
+                              }
+                              className="h-8 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                            >
+                              {(allCategories || ["Distributor", "R1", "R2"]).map((cat) => (
+                                <option key={cat} value={cat}>
+                                  {cat}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="py-2 px-3">
+                            <select
+                              value={editRow.pic_employee_id}
+                              onChange={(e) =>
+                                handleUpdateEditField("partners", p.doc_id, {
+                                  pic_employee_id: e.target.value,
+                                })
+                              }
+                              className="h-8 w-40 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                            >
+                              <option value="">-- Pilih PIC --</option>
+                              {employeesCol.map((emp) => (
+                                <option key={emp.doc_id} value={emp.doc_id}>
+                                  {emp.doc_id} · {emp.full_name}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="py-2 px-3">
+                            <select
+                              value={editRow.division_group}
+                              onChange={(e) =>
+                                handleUpdateEditField("partners", p.doc_id, {
+                                  division_group: e.target.value,
+                                })
+                              }
+                              className="h-8 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                            >
+                              <option value="Field Corn">Field Corn</option>
+                              <option value="Vegetables">Vegetables</option>
+                            </select>
+                          </td>
+                          <td className="py-2 px-3">
+                            <input
+                              type="text"
+                              list="inline-prov-list"
+                              value={editRow.province}
+                              onChange={(e) =>
+                                handleUpdateEditField("partners", p.doc_id, {
+                                  province: e.target.value,
+                                })
+                              }
+                              className="h-8 w-32 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-sans font-semibold outline-none"
+                            />
+                          </td>
+                          <td className="py-2 px-3">
+                            <input
+                              type="text"
+                              value={editRow.area}
+                              onChange={(e) =>
+                                handleUpdateEditField("partners", p.doc_id, {
+                                  area: e.target.value,
+                                })
+                              }
+                              className="h-8 w-28 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-sans font-semibold outline-none"
+                            />
+                          </td>
+                          <td className="py-2 px-4 text-right whitespace-nowrap font-sans">
+                            <div className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                disabled={isSavingEdits}
+                                onClick={() => handleSaveEditedRows("partners", [p.doc_id])}
+                                className="px-2 py-1 rounded bg-[#154be2] hover:bg-[#154be2]/90 text-white text-[10px] font-bold cursor-pointer disabled:opacity-50"
+                              >
+                                Simpan
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleCancelEditRow("partners", p.doc_id)}
+                                className="px-2 py-1 rounded bg-white border border-slate-200 hover:bg-slate-100 text-[#434655] text-[10px] font-semibold cursor-pointer"
+                              >
+                                Batal
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    }
+                    return (
+                      <tr key={p.doc_id} className={`hover:bg-[#f4f2ff]/30 ${isChecked ? "bg-indigo-50/30" : ""}`}>
+                        <td className="py-2.5 px-3">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleToggleSelectRow("partners", p.doc_id)}
+                            className="cursor-pointer accent-[#154be2]"
+                          />
+                        </td>
+                        <td className="py-2.5 px-4 font-bold">{p.doc_id}</td>
+                        <td className="py-2.5 px-4 font-sans font-semibold">{p.partner_name}</td>
+                        <td className="py-2.5 px-4 text-primary font-semibold">{p.category}</td>
+                        <td className="py-2.5 px-4">
+                          {renderFkBadge(p.pic_employee_id, "employees")}
+                        </td>
+                        <td className="py-2.5 px-4 font-sans text-[#434655]">{p.division_group}</td>
+                        <td className="py-2.5 px-4 font-sans text-[#434655]">{p.province}</td>
+                        <td className="py-2.5 px-4 font-sans text-[#434655]">{p.area}</td>
+                        <td className="py-2.5 px-4 text-right font-sans whitespace-nowrap">
+                          <div className="inline-flex items-center gap-1.5">
                             <button
                               type="button"
-                              onClick={() => setPartnerEditModal({ isOpen: true, item: p._raw })}
+                              onClick={() => handleStartEditRow("partners", p)}
                               className="px-2 py-0.5 rounded bg-[#f4f2ff] hover:bg-[#e6e6ff] text-primary text-[11px] font-semibold cursor-pointer"
                             >
                               Edit
                             </button>
-                          )}
-                          {setPartnerDeleteModal && (
                             <button
                               type="button"
-                              onClick={() => setPartnerDeleteModal({ isOpen: true, item: p._raw })}
+                              onClick={() =>
+                                handleRequestDeleteRows("partners", [p.doc_id], [`${p.doc_id} · ${p.partner_name}`])
+                              }
                               className="px-2 py-0.5 rounded bg-red-50 hover:bg-red-100 text-red-600 text-[11px] font-semibold cursor-pointer"
                             >
                               Del
                             </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -2905,6 +4321,22 @@ export const TempTab: React.FC<TempTabProps> = ({
               <table className="w-full text-left border-collapse font-mono text-xs">
                 <thead>
                   <tr className="border-b border-[#e0e0fa] bg-[#f4f2ff]/60">
+                    <th className="py-2 px-3 align-top w-8">
+                      <input
+                        type="checkbox"
+                        checked={
+                          filteredEmployees.length > 0 &&
+                          filteredEmployees.every((r) => selectedRowIds.employees.includes(r.doc_id))
+                        }
+                        onChange={() =>
+                          handleToggleSelectAllVisible(
+                            "employees",
+                            filteredEmployees.map((r) => r.doc_id),
+                          )
+                        }
+                        className="cursor-pointer accent-[#154be2]"
+                      />
+                    </th>
                     {renderHeaderCell("employees", "doc_id", "doc_id (PK)")}
                     {renderHeaderCell("employees", "username", "username")}
                     {renderHeaderCell("employees", "password", "password")}
@@ -2924,6 +4356,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                 <tbody className="divide-y divide-[#f1f0fa] text-[#181a2c]">
                   {inlineDrafts.employees.map((d) => (
                     <tr key={d._draftId} className="bg-emerald-50/45 border-b border-emerald-200/70">
+                      <td className="py-2 px-3 text-[10px] font-bold text-emerald-700">+</td>
                       <td className="py-2 px-4 text-[11px] text-emerald-700 font-semibold italic">
                         (auto)
                       </td>
@@ -3068,79 +4501,254 @@ export const TempTab: React.FC<TempTabProps> = ({
                       </td>
                     </tr>
                   ))}
-                  {filteredEmployees.map((e) => (
-                    <tr key={e.doc_id} className="hover:bg-[#f4f2ff]/30">
-                      <td className="py-2.5 px-4 font-bold">{e.doc_id}</td>
-                      <td className="py-2.5 px-4 text-[#434655]">{e.username}</td>
-                      <td className="py-2.5 px-4 text-[#434655] font-mono">
-                        {e.password || "123"}
-                      </td>
-                      <td className="py-2.5 px-4 font-sans font-semibold">{e.full_name}</td>
-                      <td className="py-2.5 px-4 font-sans text-primary font-medium">
-                        <div className="flex items-center gap-1.5">
-                          <span>{e.position}</span>
-                          {e.role_level >= 5 && (
-                            <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">
-                              Super User
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-2.5 px-4 text-center font-bold">Lv.{e.role_level}</td>
-                      <td className="py-2.5 px-4">{renderFkBadge(e.upline_id, "employees")}</td>
-                      <td className="py-2.5 px-4">
-                        {e.subordinate_ids.length === 0 ? (
-                          <span className="text-[#8E94B7] text-[11px]">[] (Terbawah)</span>
-                        ) : (
-                          <div className="flex flex-wrap items-center gap-1 max-w-[260px]">
-                            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
-                              {e.subordinate_ids.length} under:
-                            </span>
-                            {e.subordinate_ids.slice(0, 4).map((subId) => (
-                              <React.Fragment key={subId}>
-                                {renderFkBadge(subId, "employees")}
-                              </React.Fragment>
-                            ))}
-                            {e.subordinate_ids.length > 4 && (
-                              <span
-                                className="text-[10px] text-[#747687] font-semibold"
-                                title={e.subordinate_ids
-                                  .map((id) => `${id}: ${idTooltipMap[id] || ""}`)
-                                  .join("\n")}
+                  {filteredEmployees.map((e) => {
+                    const editRow = inlineEdits.employees[e.doc_id];
+                    const isChecked = selectedRowIds.employees.includes(e.doc_id);
+                    if (editRow) {
+                      return (
+                        <tr key={e.doc_id} className="bg-indigo-50/55 border-b border-indigo-200">
+                          <td className="py-2 px-3">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => handleToggleSelectRow("employees", e.doc_id)}
+                              className="cursor-pointer accent-[#154be2]"
+                            />
+                          </td>
+                          <td className="py-2 px-4 font-bold text-primary">{e.doc_id}</td>
+                          <td className="py-2 px-2">
+                            <input
+                              type="text"
+                              value={editRow.username}
+                              onChange={(ev) =>
+                                handleUpdateEditField("employees", e.doc_id, {
+                                  username: ev.target.value.toLowerCase(),
+                                })
+                              }
+                              className="h-8 w-28 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                            />
+                          </td>
+                          <td className="py-2 px-2">
+                            <input
+                              type="text"
+                              value={editRow.password}
+                              onChange={(ev) =>
+                                handleUpdateEditField("employees", e.doc_id, {
+                                  password: ev.target.value,
+                                })
+                              }
+                              className="h-8 w-20 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                            />
+                          </td>
+                          <td className="py-2 px-2">
+                            <input
+                              type="text"
+                              value={editRow.full_name}
+                              onChange={(ev) =>
+                                handleUpdateEditField("employees", e.doc_id, {
+                                  full_name: ev.target.value,
+                                })
+                              }
+                              className="h-8 w-40 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-sans font-semibold outline-none"
+                            />
+                          </td>
+                          <td className="py-2 px-2">
+                            <select
+                              value={editRow.position}
+                              onChange={(ev) =>
+                                handleUpdateEditField("employees", e.doc_id, {
+                                  position: ev.target.value,
+                                })
+                              }
+                              className="h-8 w-40 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-sans font-semibold outline-none"
+                            >
+                              <option value="Business Analyst">Business Analyst</option>
+                              <option value="Commercial Lead">Commercial Lead</option>
+                              <option value="Vegetables Sales Manager">Vegetables Sales Manager</option>
+                              <option value="Area Sales Manager">Area Sales Manager</option>
+                              <option value="Sales Agronomist">Sales Agronomist</option>
+                              <option value="Business Solution">Business Solution</option>
+                            </select>
+                          </td>
+                          <td className="py-2 px-2 text-center font-bold text-primary">
+                            Lv.{editRow.role_level}
+                          </td>
+                          <td className="py-2 px-2">
+                            <select
+                              value={editRow.upline_id}
+                              onChange={(ev) =>
+                                handleUpdateEditField("employees", e.doc_id, {
+                                  upline_id: ev.target.value,
+                                })
+                              }
+                              className="h-8 w-36 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                            >
+                              <option value="">-- Tanpa Upline --</option>
+                              {employeesCol
+                                .filter((other) => other.doc_id !== e.doc_id)
+                                .map((emp) => (
+                                  <option key={emp.doc_id} value={emp.doc_id}>
+                                    {emp.doc_id} · {emp.full_name}
+                                  </option>
+                                ))}
+                            </select>
+                          </td>
+                          <td className="py-2 px-2">
+                            <select
+                              value={editRow.status}
+                              onChange={(ev) =>
+                                handleUpdateEditField("employees", e.doc_id, {
+                                  status: ev.target.value,
+                                })
+                              }
+                              className="h-8 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                            >
+                              <option value="Aktif">Aktif</option>
+                              <option value="Nonaktif">Nonaktif</option>
+                            </select>
+                          </td>
+                          <td className="py-2 px-2">
+                            <select
+                              value={editRow.division_group}
+                              onChange={(ev) =>
+                                handleUpdateEditField("employees", e.doc_id, {
+                                  division_group: ev.target.value,
+                                })
+                              }
+                              className="h-8 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
+                            >
+                              <option value="Field Corn">Field Corn</option>
+                              <option value="Vegetables">Vegetables</option>
+                              <option value="All">All</option>
+                            </select>
+                          </td>
+                          <td className="py-2 px-2">
+                            <input
+                              type="text"
+                              list="inline-prov-list"
+                              value={editRow.province}
+                              onChange={(ev) =>
+                                handleUpdateEditField("employees", e.doc_id, {
+                                  province: ev.target.value,
+                                })
+                              }
+                              className="h-8 w-28 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-sans font-semibold outline-none"
+                            />
+                          </td>
+                          <td className="py-2 px-2">
+                            <input
+                              type="text"
+                              value={editRow.area}
+                              onChange={(ev) =>
+                                handleUpdateEditField("employees", e.doc_id, {
+                                  area: ev.target.value,
+                                })
+                              }
+                              className="h-8 w-24 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-sans font-semibold outline-none"
+                            />
+                          </td>
+                          <td className="py-2 px-4 text-right whitespace-nowrap font-sans">
+                            <div className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                disabled={isSavingEdits}
+                                onClick={() => handleSaveEditedRows("employees", [e.doc_id])}
+                                className="px-2 py-1 rounded bg-[#154be2] hover:bg-[#154be2]/90 text-white text-[10px] font-bold cursor-pointer disabled:opacity-50"
                               >
-                                +{e.subordinate_ids.length - 4} lagi
+                                Simpan
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleCancelEditRow("employees", e.doc_id)}
+                                className="px-2 py-1 rounded bg-white border border-slate-200 hover:bg-slate-100 text-[#434655] text-[10px] font-semibold cursor-pointer"
+                              >
+                                Batal
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    }
+                    return (
+                      <tr key={e.doc_id} className={`hover:bg-[#f4f2ff]/30 ${isChecked ? "bg-indigo-50/30" : ""}`}>
+                        <td className="py-2.5 px-3">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleToggleSelectRow("employees", e.doc_id)}
+                            className="cursor-pointer accent-[#154be2]"
+                          />
+                        </td>
+                        <td className="py-2.5 px-4 font-bold">{e.doc_id}</td>
+                        <td className="py-2.5 px-4 text-[#434655]">{e.username}</td>
+                        <td className="py-2.5 px-4 text-[#434655] font-mono">
+                          {e.password || "123"}
+                        </td>
+                        <td className="py-2.5 px-4 font-sans font-semibold">{e.full_name}</td>
+                        <td className="py-2.5 px-4 font-sans text-primary font-medium">
+                          <div className="flex items-center gap-1.5">
+                            <span>{e.position}</span>
+                            {e.role_level >= 5 && (
+                              <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">
+                                Super User
                               </span>
                             )}
                           </div>
-                        )}
-                      </td>
-                      <td className="py-2.5 px-4 font-sans text-[#434655]">{e.division_group}</td>
-                      <td className="py-2.5 px-4 font-sans text-[#434655]">{e.province}</td>
-                      <td className="py-2.5 px-4 font-sans text-[#434655]">{e.area}</td>
-                      <td className="py-2.5 px-4 text-right font-sans">
-                        <div className="inline-flex items-center gap-1.5">
-                          {setEmployeeEditModal && (
+                        </td>
+                        <td className="py-2.5 px-4 text-center font-bold">Lv.{e.role_level}</td>
+                        <td className="py-2.5 px-4">{renderFkBadge(e.upline_id, "employees")}</td>
+                        <td className="py-2.5 px-4">
+                          {e.subordinate_ids.length === 0 ? (
+                            <span className="text-[#8E94B7] text-[11px]">[] (Terbawah)</span>
+                          ) : (
+                            <div className="flex flex-wrap items-center gap-1 max-w-[260px]">
+                              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                                {e.subordinate_ids.length} under:
+                              </span>
+                              {e.subordinate_ids.slice(0, 4).map((subId) => (
+                                <React.Fragment key={subId}>
+                                  {renderFkBadge(subId, "employees")}
+                                </React.Fragment>
+                              ))}
+                              {e.subordinate_ids.length > 4 && (
+                                <span
+                                  className="text-[10px] text-[#747687] font-semibold"
+                                  title={e.subordinate_ids
+                                    .map((id) => `${id}: ${idTooltipMap[id] || ""}`)
+                                    .join("\n")}
+                                >
+                                  +{e.subordinate_ids.length - 4} lagi
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-4 font-sans text-[#434655]">{e.division_group}</td>
+                        <td className="py-2.5 px-4 font-sans text-[#434655]">{e.province}</td>
+                        <td className="py-2.5 px-4 font-sans text-[#434655]">{e.area}</td>
+                        <td className="py-2.5 px-4 text-right font-sans whitespace-nowrap">
+                          <div className="inline-flex items-center gap-1.5">
                             <button
                               type="button"
-                              onClick={() => setEmployeeEditModal({ isOpen: true, item: e._raw })}
+                              onClick={() => handleStartEditRow("employees", e)}
                               className="px-2 py-0.5 rounded bg-[#f4f2ff] hover:bg-[#e6e6ff] text-primary text-[11px] font-semibold cursor-pointer"
                             >
                               Edit
                             </button>
-                          )}
-                          {setEmployeeDeleteModal && (
                             <button
                               type="button"
-                              onClick={() => setEmployeeDeleteModal({ isOpen: true, item: e._raw })}
+                              onClick={() =>
+                                handleRequestDeleteRows("employees", [e.doc_id], [`${e.doc_id} · ${e.full_name}`])
+                              }
                               className="px-2 py-0.5 rounded bg-red-50 hover:bg-red-100 text-red-600 text-[11px] font-semibold cursor-pointer"
                             >
                               Del
                             </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -3193,6 +4801,57 @@ export const TempTab: React.FC<TempTabProps> = ({
           isProcessing={isActionLoading}
           itemName={employeeDeleteModal.item?.name}
         />
+      )}
+
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#181a2c]/45 backdrop-blur-xs p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white border border-[#e0e0fa] shadow-2xl overflow-hidden">
+            <div className="px-5 py-4 bg-red-50/80 border-b border-red-100 flex items-center gap-2.5">
+              <span className="material-symbols-outlined text-red-600 text-[20px]">warning</span>
+              <div>
+                <h3 className="text-sm font-bold text-[#181a2c]">
+                  Konfirmasi Hapus ({deleteConfirm.colKey})
+                </h3>
+                <p className="text-[11px] text-red-700">
+                  {deleteConfirm.docIds.length} dokumen akan dihapus permanen dari Firebase Firestore.
+                </p>
+              </div>
+            </div>
+            <div className="p-5 space-y-3">
+              <div className="max-h-40 overflow-y-auto rounded-xl bg-[#f9f8ff] border border-[#e0e0fa] p-3 font-mono text-[11px] text-[#181a2c] space-y-1">
+                {deleteConfirm.labels.slice(0, 12).map((lbl, idx) => (
+                  <div key={`${lbl}_${idx}`} className="truncate">
+                    • {lbl}
+                  </div>
+                ))}
+                {deleteConfirm.labels.length > 12 && (
+                  <div className="text-[#747687] italic">
+                    +{deleteConfirm.labels.length - 12} dokumen lainnya...
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={isDeletingRows}
+                  onClick={() => setDeleteConfirm(null)}
+                  className="h-9 px-4 rounded-xl bg-white border border-[#e0e0fa] hover:bg-[#f4f2ff] text-[#434655] text-xs font-semibold cursor-pointer disabled:opacity-50"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingRows}
+                  onClick={handleConfirmDeleteRows}
+                  className="h-9 px-4 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold cursor-pointer flex items-center gap-1.5 disabled:opacity-60"
+                >
+                  <span className="material-symbols-outlined text-[15px]">delete</span>
+                  {isDeletingRows ? "Menghapus..." : `Ya, Hapus (${deleteConfirm.docIds.length})`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
