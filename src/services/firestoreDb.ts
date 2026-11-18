@@ -26,6 +26,7 @@ import {
   toIsoDateStr,
   toStrictDivision,
   toValidDocId,
+  type DivisionStrict,
   type DrShipmentFsDoc,
   type EmployeeFsDoc,
   type HybridFsDoc,
@@ -774,7 +775,7 @@ export async function upsertPartnerFirestore(
     category: string;
     pic_employee_id: string | null;
     pic_name: string;
-    division_group: "Field Corn" | "Vegetables";
+    division_group: DivisionStrict;
     province: string;
     area: string;
   },
@@ -892,7 +893,7 @@ export async function saveUploadedDrToFirestore(
     drDate: string;
     expired: string;
     hybrid: string;
-    crops: "Field Corn" | "Vegetables";
+    crops: DivisionStrict;
   }>,
   currentDataset: NormalizedDataset,
 ): Promise<{ uploadedCount: number; createdPartners: number }> {
@@ -1241,7 +1242,7 @@ export async function addHybridFirestore(
   params: {
     hybrid_name: string;
     sku?: string | null;
-    crop_type: "Field Corn" | "Vegetables";
+    crop_type: DivisionStrict;
     existingHybrids: HybridFsDoc[];
   },
 ): Promise<HybridFsDoc> {
@@ -1291,7 +1292,7 @@ export async function addLotFirestore(
     hybrid_id: string | null;
     sku?: string | null;
     new_hybrid_name?: string;
-    crop_type?: "Field Corn" | "Vegetables";
+    crop_type?: DivisionStrict;
     shipping_date: string;
     exp_date: string;
     initial_dr_kg: number;
@@ -1620,7 +1621,7 @@ export async function ensureSuperUserAdityaFirestore(
  */
 export async function bulkAddHybridsFirestore(
   user: User | null | undefined,
-  rows: Array<{ hybrid_name: string; sku?: string | null; crop_type: "Field Corn" | "Vegetables" }>,
+  rows: Array<{ hybrid_name: string; sku?: string | null; crop_type: DivisionStrict }>,
   existingHybrids: HybridFsDoc[],
 ): Promise<number> {
   const ownerUid = user?.uid || "public";
@@ -1991,7 +1992,7 @@ export async function bulkAddPartnersFirestore(
     partner_name: string;
     category: string;
     pic_employee_id: string | null;
-    division_group: "Field Corn" | "Vegetables";
+    division_group: DivisionStrict;
     province: string;
     area: string;
   }>,
@@ -2050,7 +2051,7 @@ export async function bulkAddEmployeesFirestore(
     position: string;
     role_level: number;
     upline_id: string | null;
-    division_group: "Field Corn" | "Vegetables" | "All";
+    division_group: DivisionStrict | "All";
     province: string;
     area: string;
     password?: string;
@@ -2146,7 +2147,7 @@ export async function bulkDeleteCollectionDocsFirestore(
  * Bulk update existing Hybrid documents in Firestore /hybrids.
  */
 export async function bulkUpdateHybridsFirestore(
-  rows: Array<{ doc_id: string; hybrid_name: string; sku?: string | null; hadSku?: boolean; crop_type: "Field Corn" | "Vegetables" }>,
+  rows: Array<{ doc_id: string; hybrid_name: string; sku?: string | null; hadSku?: boolean; crop_type: DivisionStrict }>,
 ): Promise<number> {
   const ops = rows
     .filter((r) => toValidDocId(r.doc_id, "") && clampStr(r.hybrid_name, 100))
@@ -2377,7 +2378,7 @@ export async function bulkUpdatePartnersFirestore(
     partner_name: string;
     category: string;
     pic_employee_id: string | null;
-    division_group: "Field Corn" | "Vegetables";
+    division_group: DivisionStrict;
     province: string;
     area: string;
   }>,
@@ -2424,7 +2425,7 @@ export async function bulkUpdateEmployeesFirestore(
     upline_id: string | null;
     subordinate_ids?: string[];
     access_scope_ids?: string[];
-    division_group: "Field Corn" | "Vegetables" | "All";
+    division_group: DivisionStrict | "All";
     province: string;
     area: string;
     status?: "Aktif" | "Nonaktif";

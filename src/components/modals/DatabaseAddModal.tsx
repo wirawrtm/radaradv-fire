@@ -319,6 +319,7 @@ export const DatabaseAddModal: React.FC<DatabaseAddModalProps> = ({
                     className="w-full h-11 bg-[#fbf8ff] border border-[#edecff] focus:border-primary rounded-full px-4 text-xs font-semibold text-[#111] outline-none"
                   >
                     <option value="Field Corn">Field Corn</option>
+                    <option value="Fresh Corn">Fresh Corn</option>
                     <option value="Vegetables">Vegetables</option>
                   </select>
                 </div>
@@ -384,6 +385,7 @@ export const DatabaseAddModal: React.FC<DatabaseAddModalProps> = ({
                         className="w-full h-11 bg-[#fbf8ff] border border-[#edecff] focus:border-primary rounded-full px-4 text-xs font-semibold text-[#111] outline-none"
                       >
                         <option value="Field Corn">Field Corn</option>
+                        <option value="Fresh Corn">Fresh Corn</option>
                         <option value="Vegetables">Vegetables</option>
                       </select>
                     </div>

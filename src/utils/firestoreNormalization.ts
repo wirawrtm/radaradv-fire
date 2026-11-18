@@ -1,7 +1,7 @@
 import { cleanForMatch, extractExpFromLot, getValidCategory, safeParseFloat } from "./formatters";
 import { MONTH_KEYS } from "./constants";
 
-export type DivisionStrict = "Field Corn" | "Vegetables";
+export type DivisionStrict = "Field Corn" | "Fresh Corn" | "Vegetables";
 
 export interface MonthlyOpnameCell {
   in: number;
@@ -115,8 +115,12 @@ export const clampStr = (raw: any, maxLen: number, fallback = ""): string => {
   return s.length > maxLen ? s.slice(0, maxLen) : s;
 };
 
-export const toStrictDivision = (raw: any): DivisionStrict =>
-  String(raw || "").toLowerCase().includes("veg") ? "Vegetables" : "Field Corn";
+export const toStrictDivision = (raw: any): DivisionStrict => {
+  const s = String(raw || "").toLowerCase();
+  if (s.includes("fresh")) return "Fresh Corn";
+  if (s.includes("veg")) return "Vegetables";
+  return "Field Corn";
+};
 
 export const toIsoDateStr = (raw: any): string => {
   if (!raw || raw === "N/A" || raw === "-") return "";

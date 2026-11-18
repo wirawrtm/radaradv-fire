@@ -175,9 +175,12 @@ export const TempTab: React.FC<TempTabProps> = ({
 }) => {
   const [activeCollection, setActiveCollection] = useState<CollectionKey>("opname_logs");
   const [viewMode, setViewMode] = useState<"table" | "json">("table");
-  const [activeDivision, setActiveDivision] = useState<"Field Corn" | "Vegetables">(() =>
-    String(userData?.group || "").toLowerCase().includes("veg") ? "Vegetables" : "Field Corn",
-  );
+  const [activeDivision, setActiveDivision] = useState<"Field Corn" | "Fresh Corn" | "Vegetables">(() => {
+    const raw = String(userData?.group || "").toLowerCase();
+    if (raw.includes("fresh")) return "Fresh Corn";
+    if (raw.includes("veg")) return "Vegetables";
+    return "Field Corn";
+  });
   const [simulatedLoginEmpId, setSimulatedLoginEmpId] = useState<string>("ADMIN_DIV");
   const [colFilters, setColFilters] = useState<Record<string, string>>({});
   const [sortConfig, setSortConfig] = useState<{ field: string; dir: "asc" | "desc" }>({
@@ -297,8 +300,12 @@ export const TempTab: React.FC<TempTabProps> = ({
     });
   };
 
-  const toStrictDivision = (raw: any): "Field Corn" | "Vegetables" =>
-    String(raw || "").toLowerCase().includes("veg") ? "Vegetables" : "Field Corn";
+  const toStrictDivision = (raw: any): "Field Corn" | "Fresh Corn" | "Vegetables" => {
+    const s = String(raw || "").toLowerCase();
+    if (s.includes("fresh")) return "Fresh Corn";
+    if (s.includes("veg")) return "Vegetables";
+    return "Field Corn";
+  };
 
   const sourceWorking = useMemo(
     () => (rawWorkingData && rawWorkingData.length > 0 ? rawWorkingData : workingData || []),
@@ -342,7 +349,7 @@ export const TempTab: React.FC<TempTabProps> = ({
       upline_id: string | null;
       subordinate_ids: string[];
       access_scope_ids: string[];
-      division_group: "Field Corn" | "Vegetables" | "All";
+      division_group: "Field Corn" | "Fresh Corn" | "Vegetables" | "All";
       province: string;
       area: string;
       status: "Aktif" | "Nonaktif";
@@ -358,7 +365,7 @@ export const TempTab: React.FC<TempTabProps> = ({
       baseDocs = firestoreDataset.employees.map((e) => {
         const position = String(e.position || "Business Solution").trim();
         const role_level = getRoleLevel(position, e.role_level);
-        const division_group: "Field Corn" | "Vegetables" | "All" =
+        const division_group: "Field Corn" | "Fresh Corn" | "Vegetables" | "All" =
           String(e.division_group || "").trim().toLowerCase() === "all"
             ? "All"
             : toStrictDivision(e.division_group || position);
@@ -416,7 +423,7 @@ export const TempTab: React.FC<TempTabProps> = ({
         const position = String(e.position || "Business Solution").trim();
         const role_level = getRoleLevel(position, e.level);
         const rawGroup = String(e.group || e.division_group || position).trim().toLowerCase();
-        const division_group: "Field Corn" | "Vegetables" | "All" =
+        const division_group: "Field Corn" | "Fresh Corn" | "Vegetables" | "All" =
           rawGroup === "all" ? "All" : toStrictDivision(e.group || position);
         const uname = String(e.user || e.email || "").trim().toLowerCase();
 
@@ -593,7 +600,7 @@ export const TempTab: React.FC<TempTabProps> = ({
       return { hybridsCol: docs, hybridByClean: lookup };
     }
 
-    const map = new Map<string, { hybrid_name: string; sku: string; crop_type: "Field Corn" | "Vegetables" }>();
+    const map = new Map<string, { hybrid_name: string; sku: string; crop_type: "Field Corn" | "Fresh Corn" | "Vegetables" }>();
 
     mergedDrSales.forEach((d) => {
       const hName = String(d.hybrid || "").trim().toUpperCase();
@@ -1003,7 +1010,7 @@ export const TempTab: React.FC<TempTabProps> = ({
     [simulatedLoginEmpId, empById],
   );
 
-  const effectiveDivision: "Field Corn" | "Vegetables" =
+  const effectiveDivision: "Field Corn" | "Fresh Corn" | "Vegetables" =
     activeLoginEmp && activeLoginEmp.division_group !== "All"
       ? activeLoginEmp.division_group
       : activeDivision;
@@ -2885,6 +2892,20 @@ export const TempTab: React.FC<TempTabProps> = ({
             <button
               type="button"
               onClick={() => {
+                setActiveDivision("Fresh Corn");
+                setSimulatedLoginEmpId("ADMIN_DIV");
+              }}
+              className={`px-3 py-1 rounded-lg text-xs font-mono font-bold cursor-pointer transition-colors ${
+                effectiveDivision === "Fresh Corn"
+                  ? "bg-amber-600 text-white shadow-sm"
+                  : "text-[#434655] hover:text-[#181a2c]"
+              }`}
+            >
+              Fresh Corn
+            </button>
+            <button
+              type="button"
+              onClick={() => {
                 setActiveDivision("Vegetables");
                 setSimulatedLoginEmpId("ADMIN_DIV");
               }}
@@ -4524,6 +4545,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                           className="h-8 w-36 bg-white border border-emerald-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
                         >
                           <option value="Field Corn">Field Corn</option>
+                          <option value="Fresh Corn">Fresh Corn</option>
                           <option value="Vegetables">Vegetables</option>
                         </select>
                       </td>
@@ -4607,6 +4629,7 @@ export const TempTab: React.FC<TempTabProps> = ({
                               className="h-8 w-36 bg-white border border-indigo-300 focus:border-primary rounded-lg px-2 text-[11px] font-semibold outline-none"
                             >
                               <option value="Field Corn">Field Corn</option>
+                              <option value="Fresh Corn">Fresh Corn</option>
                               <option value="Vegetables">Vegetables</option>
                             </select>
                           </td>

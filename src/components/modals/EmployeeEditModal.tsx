@@ -35,7 +35,7 @@ export const EmployeeEditModal: React.FC<EmployeeEditModalProps> = ({
   const [province, setProvince] = useState("");
   const [password, setPassword] = useState("");
   const [upline, setUpline] = useState("");
-  const [group, setGroup] = useState<"Field Corn" | "Vegetables" | "All">("Field Corn");
+  const [group, setGroup] = useState<"Field Corn" | "Fresh Corn" | "Vegetables" | "All">("Field Corn");
 
   const isAdd = !!item?.isAdd;
 
@@ -67,12 +67,14 @@ export const EmployeeEditModal: React.FC<EmployeeEditModalProps> = ({
       setPassword(String(item.password || "123"));
       setUpline(String(item.upline || ""));
       const rawDiv = String(item.group || userData?.group || "Field Corn").trim().toLowerCase();
-      const initDiv: "Field Corn" | "Vegetables" | "All" =
+      const initDiv: "Field Corn" | "Fresh Corn" | "Vegetables" | "All" =
         rawDiv === "all"
           ? "All"
-          : rawDiv.includes("veg")
-            ? "Vegetables"
-            : "Field Corn";
+          : rawDiv.includes("fresh")
+            ? "Fresh Corn"
+            : rawDiv.includes("veg")
+              ? "Vegetables"
+              : "Field Corn";
       setGroup(initDiv);
 
       if (isAdd && userLevel === 2) {
@@ -224,11 +226,12 @@ export const EmployeeEditModal: React.FC<EmployeeEditModalProps> = ({
               <select
                 value={group}
                 onChange={(e) =>
-                  setGroup(e.target.value as "Field Corn" | "Vegetables" | "All")
+                  setGroup(e.target.value as "Field Corn" | "Fresh Corn" | "Vegetables" | "All")
                 }
                 className="w-full h-11 bg-[#fbf8ff] border border-[#edecff] focus:border-primary rounded-full px-4 text-xs font-semibold text-[#111] outline-none"
               >
                 <option value="Field Corn">Field Corn</option>
+                <option value="Fresh Corn">Fresh Corn</option>
                 <option value="Vegetables">Vegetables</option>
                 <option value="All">All (Super User · Semua Divisi)</option>
               </select>
